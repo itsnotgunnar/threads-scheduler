@@ -4,16 +4,17 @@
 #include <stdio.h>
 #include <string.h>    // For memset, strncpy, etc.
 #include <stdarg.h>    // For va_list, vsprintf in DebugConsole
+
 #include "THREADSLib.h"
-#include "Scheduler.h" // Scheduler struct definitions
-#include "Processes.h" // Process struct definitions
+#include "Scheduler.h"
+#include "Processes.h"
 
 /*****************************************************************************
  *                            GLOBAL DATA & DEFINES
  *****************************************************************************/
- 
+
 Process processTable[MAX_PROCESSES];
-Process *runningProcess = NULL;
+Process* runningProcess = NULL;
 int nextPid = 1;
 int debugFlag = 1;
 
@@ -27,7 +28,20 @@ int debugFlag = 1;
 /*****************************************************************************
  *                        FORWARD DECLARATIONS (HELPERS)
  *****************************************************************************/
- 
+
+ // Because we don't define set_interrupt_handler in THREADSLib.h
+static void set_interrupt_handler(int interruptNumber, void (*handler)(void));
+
+static void set_interrupt_handler(int interruptNumber, void (*handler)(void))
+{
+    interrupt_handler_t* vect = get_interrupt_handlers();
+    vect[interruptNumber] = (interrupt_handler_t)handler;
+}
+// The ready queue functions
+void ready_queue_init(void);
+void add_to_ready_queue(Process* proc);
+Process* get_highest_priority_ready_process(void);
+
 // Finds an unused slot in processTable. Returns the index if found, else -1.
 static int findFreeProcessSlot(void);
 
@@ -77,13 +91,13 @@ check_io_function check_io;
    Purpose - This is the first function called by THREADS on startup.
 
              The function must setup the OS scheduler and primitive
-             functionality and then spawn the first two processes.  
-             
-             The first two process are the watchdog process 
-             and the startup process SchedulerEntryPoint.  
-             
+             functionality and then spawn the first two processes.
+
+             The first two process are the watchdog process
+             and the startup process SchedulerEntryPoint.
+
              The statup process is used to initialize additional layers
-             of the OS.  It is also used for testing the scheduler 
+             of the OS.  It is also used for testing the scheduler
              functions.
 
    Parameters - Arguments *pArgs - these arguments are unused at this time.
@@ -93,7 +107,7 @@ check_io_function check_io;
    Side Effects - The effects of this function is the launching of the kernel.
 
  *************************************************************************/
-int bootstrap(void *pArgs)
+int bootstrap(void* pArgs)
 {
     int result; /* value returned by call to spawn() */
 
@@ -104,7 +118,7 @@ int bootstrap(void *pArgs)
     memset(processTable, 0, sizeof(processTable));
 
     // Initialize your ready queues, if you have multiple or a single queue.
-    void ready_queue_init();
+    ready_queue_init();
 
     // Install the timer interrupt handler to time_slice() only.
     // The other interrupts (IO, exception, syscalls) can remain NULL or be set in the future.
@@ -126,7 +140,7 @@ int bootstrap(void *pArgs)
     result = k_spawn("Scheduler", SchedulerEntryPoint, NULL, 2 * THREADS_MIN_STACK_SIZE, HIGHEST_PRIORITY);
     if (result < 0)
     {
-        console_output(debugFlag,"Scheduler(): spawn for SchedulerEntryPoint returned an error (%d), stopping...\n", result);
+        console_output(debugFlag, "Scheduler(): spawn for SchedulerEntryPoint returned an error (%d), stopping...\n", result);
         stop(1);
     }
 
@@ -145,7 +159,7 @@ int bootstrap(void *pArgs)
    k_spawn()
 
    Purpose - spawns a new process.
-   
+
              Finds an empty entry in the process table and initializes
              information of the process.  Updates information in the
              parent process to reflect this child process creation.
@@ -153,11 +167,11 @@ int bootstrap(void *pArgs)
    Parameters - the process's entry point function, the stack size, and
                 the process's priority.
 
-   Returns - The Process ID (pid) of the new child process 
+   Returns - The Process ID (pid) of the new child process
              The function must return if the process cannot be created.
 
 ************************************************************************ */
-int k_spawn(char* name, int (*entryPoint)(void *), void* arg, int stack_size, int priority)
+int k_spawn(char* name, int (*entryPoint)(void*), void* arg, int stack_size, int priority)
 {
 
     int proc_slot;
@@ -167,7 +181,7 @@ int k_spawn(char* name, int (*entryPoint)(void *), void* arg, int stack_size, in
     disableInterrupts();
 
     /* Validate all of the parameters, starting with the name. */
-    
+
     // Check if process name is NULL
     // If name is NULL, strncpy(pNewProc->name, name, MAXNAME); would cause a segmentation fault.
     if (name == NULL)
@@ -176,15 +190,15 @@ int k_spawn(char* name, int (*entryPoint)(void *), void* arg, int stack_size, in
         enableInterrupts();
         return -1;
     }
-    
+
     // Check if entryPoint is NULL
     // If entryPoint is NULL, the process would have no valid function to execute, leading to undefined behavior when it tries to run.
-    if (entryPoint == NULL) 
+    if (entryPoint == NULL)
     {
         console_output(debugFlag, "spawn(): entryPoint value is NULL.\n");
         return -1;
     }
-    
+
     // Ensure name is not too large, 128
     if (strlen(name) >= (THREADS_MAX_NAME))
     {
@@ -199,7 +213,7 @@ int k_spawn(char* name, int (*entryPoint)(void *), void* arg, int stack_size, in
             stop(1); // never returns
         }
     }
-    
+
     // Ensure priority is within the allowed range (0 - 5)
     if (priority < 0 || priority > 5)
     {
@@ -226,25 +240,25 @@ int k_spawn(char* name, int (*entryPoint)(void *), void* arg, int stack_size, in
     // Initialize the new process
     Process* newProc = &processTable[slot];
     memset(newProc, 0, sizeof(Process)); // clear it out
-    
+
     // The assignment states the new PID is returned upon success.
     // We can use nextPid or the slot index, up to us 
     newProc->pid = nextPid++;
     strncpy(newProc->name, name, THREADS_MAX_NAME);
-    newProc->priority      = priority;
-    newProc->status        = READY;  // newly created => READY
-    newProc->context       = NULL;   // set later with context_initialize
-    newProc->entryPoint    = entryPoint; // sometimes optional to store
-    newProc->signaledFlag  = 0; 
-    newProc->exitCode      = 0;
-    newProc->startTime     = read_clock(); // capture a start timestamp
-    newProc->cpuTime       = 0;  // no CPU usage yet
-    
+    newProc->priority = priority;
+    newProc->status = READY;  // newly created => READY
+    newProc->context = NULL;   // set later with context_initialize
+    newProc->entryPoint = entryPoint; // sometimes optional to store
+    newProc->signaledFlag = 0;
+    newProc->exitCode = 0;
+    newProc->startTime = read_clock(); // capture a start timestamp
+    newProc->cpuTime = 0;  // no CPU usage yet
+
     // The new process's parent is the current runningProcess (except for watchers from bootstrap).
-    newProc->pParent       = runningProcess;
-    newProc->pChildren     = NULL;
+    newProc->pParent = runningProcess;
+    newProc->pChildren = NULL;
     newProc->nextSiblingProcess = NULL; // will link below
-    
+
     // Initialize the process's context. 
     // We pass 'launch' as the function the CPU will jump to first, 
     // and 'arg' as the parameter. Inside 'launch', we actually call entryPoint.
@@ -261,12 +275,12 @@ int k_spawn(char* name, int (*entryPoint)(void *), void* arg, int stack_size, in
         newProc->nextSiblingProcess = runningProcess->pChildren;
         runningProcess->pChildren = newProc;
     }
-    
+
     // Put the new process on the ready queue so dispatcher can schedule it.
     add_to_ready_queue(newProc);
 
     enableInterrupts();
-    
+
     // Return the new child's pid on success
     return newProc->pid;
 
@@ -277,13 +291,13 @@ int k_spawn(char* name, int (*entryPoint)(void *), void* arg, int stack_size, in
    Name - launch
 
    Purpose - Utility function that makes sure the environment is ready,
-             such as enabling interrupts, for the new process.  
+             such as enabling interrupts, for the new process.
 
    Parameters - none
 
    Returns - nothing
 *************************************************************************/
-static int launch(void *args)
+static int launch(void* args)
 {
 
     // By the time we get here, 'runningProcess' should be set to
@@ -300,7 +314,7 @@ static int launch(void *args)
     int (*actualEntry)(void*) = runningProcess->entryPoint;
     int returnCode = 0;
     if (actualEntry) {
-        returnCode = actualEntry(args); 
+        returnCode = actualEntry(args);
         // We shouldn't expect user processes to return from main
         //  but if it does we'll call k_exit with that code.
     }
@@ -320,7 +334,7 @@ static int launch(void *args)
    Purpose - Wait for a child process to quit.  Return right away if
              a child has already quit.
 
-   Parameters - Output parameter for the child's exit code. 
+   Parameters - Output parameter for the child's exit code.
 
    Returns - the pid of the quitting child, or
         -4 if the process has no children
@@ -353,10 +367,10 @@ int k_wait(int* p_child_exit_code)
 
     // Otherwise, we must block until a child terminates. 
     // We'll block with status=WAIT_BLOCK (which is > 10).
-    enableInterrupts(); 
+    enableInterrupts();
     // block(...) can re-enable or call dispatcher, so let's separate the calls.
 
-    int blockResult = block(WAIT_BLOCK); 
+    int blockResult = block(WAIT_BLOCK);
     // block() will call dispatcher() => we'll eventually resume here after 'unblock' or something.
 
     // When we resume here, we check if we were signaled while blocked.
@@ -388,13 +402,13 @@ int k_wait(int* p_child_exit_code)
 /**************************************************************************
    Name - k_exit
 
-   Purpose - Exits a process and coordinates with the parent for cleanup 
+   Purpose - Exits a process and coordinates with the parent for cleanup
              and return of the exit code.
 
    Parameters - the code to return to the grieving parent
 
    Returns - nothing
-   
+
 *************************************************************************/
 void k_exit(int exit_code)
 {
@@ -411,12 +425,13 @@ void k_exit(int exit_code)
     // If the process was signaled, override exit code to -5
     if (runningProcess->signaledFlag) {
         runningProcess->exitCode = -5;
-    } else {
+    }
+    else {
         runningProcess->exitCode = exit_code;
     }
 
     // Possibly unblock the parent if it's waiting or joining
-    if (runningProcess->pParent) 
+    if (runningProcess->pParent)
     {
         // If parent is blocked (WAIT_BLOCK or JOIN_BLOCK), set it READY
         if (runningProcess->pParent->status == WAIT_BLOCK ||
@@ -557,7 +572,7 @@ int k_join(int pid, int* p_child_exit_code)
  *                        unblock(int pid)
  *
  * Unblocks a process with pid 'pid' returning it to READY state and
- * placing it on the ready queue. 
+ * placing it on the ready queue.
  *
  * Returns
  *   0 => success
@@ -592,7 +607,7 @@ int unblock(int pid)
  *
  * Blocks the calling process with a given block_status, which must be > 10.
  * Then calls dispatcher() to switch away. We eventually resume here (return)
- * when unblocked. 
+ * when unblocked.
  *
  * Returns:
  *   0 => unblocked normally
@@ -630,11 +645,11 @@ int block(int block_status)
 /*****************************************************************************
  *                        get_start_time(void)
  *
- * Returns the start time of the calling process in microseconds. 
+ * Returns the start time of the calling process in microseconds.
  *****************************************************************************/
 int get_start_time(void)
 {
-    if (!runningProcess) return 0; 
+    if (!runningProcess) return 0;
     return (int)(runningProcess->startTime);
 }
 
@@ -694,8 +709,8 @@ void display_process_table(void)
             int parentId = (p->pParent) ? p->pParent->pid : -1;
             int kids = countChildren(p);
             console_output(TRUE, "%2d  %4d   %2d  %5d  %5d  %7d  %s\n",
-                           p->pid, parentId, p->priority, 
-                           p->status, kids, p->cpuTime, p->name);
+                p->pid, parentId, p->priority,
+                p->status, kids, p->cpuTime, p->name);
         }
     }
 }
@@ -732,7 +747,7 @@ void dispatcher(void)
 
     // We have an old process (runningProcess) and a new process (nextProc).
     Process* oldProc = runningProcess;
-    runningProcess   = nextProc;
+    runningProcess = nextProc;
     runningProcess->status = RUNNING;  // Mark it as running now
 
     // If oldProc was running, you might want to set it to READY (unless it just blocked)
@@ -838,10 +853,10 @@ static void DebugConsole(char* format, ...)
  *            SMALL HELPER FUNCTIONS
  *****************************************************************************/
 
-/**
- * Finds a free entry in processTable (status==0) and returns its index, 
- * or -1 if none are free.
- */
+ /**
+  * Finds a free entry in processTable (status==0) and returns its index,
+  * or -1 if none are free.
+  */
 static int findFreeProcessSlot(void)
 {
     for (int i = 0; i < MAX_PROCESSES; i++) {
@@ -886,7 +901,8 @@ static void removeChildFromParentList(Process* child)
             if (prev == NULL) {
                 // child is first in parent's children list
                 parent->pChildren = curr->nextSiblingProcess;
-            } else {
+            }
+            else {
                 // child is in middle or end
                 prev->nextSiblingProcess = curr->nextSiblingProcess;
             }
@@ -932,7 +948,7 @@ static int countChildren(Process* parent)
 }
 
 /**
- * disableInterrupts() and enableInterrupts() 
+ * disableInterrupts() and enableInterrupts()
  * manipulate the processor status register (PSR).int kids = countChildren(p);
  */
 static inline void disableInterrupts()
@@ -961,13 +977,13 @@ int check_io_scheduler()
  *           READY QUEUE IMPLEMENTATION
  *****************************************************************************/
 
-/*
- * An array of lists (one list per priority level).
- *   - Index 0 => priority 0
- *   - Index 1 => priority 1
- *   ...
- *   - Index HIGHEST_PRIORITY => priority 5
- */
+ /*
+  * An array of lists (one list per priority level).
+  *   - Index 0 => priority 0
+  *   - Index 1 => priority 1
+  *   ...
+  *   - Index HIGHEST_PRIORITY => priority 5
+  */
 static Process* readyQueue[HIGHEST_PRIORITY + 1] = { NULL };
 
 /**
