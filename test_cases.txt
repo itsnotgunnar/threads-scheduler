@@ -1,0 +1,1672 @@
+Scheduler00
+
+#include <stdio.h>
+#include "THREADSLib.h"
+#include "SchedulerTesting.h"
+#include "Scheduler.h"
+
+/*********************************************************************************
+*
+* SchedulerTest00
+*
+* Simple test case that creates one child process, waits for the process to 
+* terminate, and then exits.
+*
+*********************************************************************************/
+int SchedulerEntryPoint(void* pArgs)
+{
+    char* testName = "SchedulerTest00";
+    int status=-1, pid1, kidpid=-1;
+    char nameBuffer[512];
+
+    /* Spawn one simple child process at a lower priority. */
+    console_output(FALSE, "\n%s: started\n", testName);
+
+    /* Use the -Child naming convention for the child process name. */
+    snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child1", testName);
+    pid1 = k_spawn(nameBuffer, SimpleDelayExit, nameBuffer, THREADS_MIN_STACK_SIZE, 3);
+    console_output(FALSE, "%s: after spawn of child with pid %d\n", testName, pid1);
+
+    /* Wait for the child and print the results. */
+    console_output(FALSE, "%s: waiting for child process\n", testName);
+    kidpid = k_wait(&status);
+    console_output(FALSE, "%s: exit status for child %d is %d\n", testName, kidpid, status);
+
+    k_exit(0);
+
+    return 0;
+}
+
+Scheduler01
+
+#include <stdio.h>
+#include "THREADSLib.h"
+#include "SchedulerTesting.h"
+#include "Scheduler.h"
+
+/*********************************************************************************
+*
+* SchedulerTest01
+*
+* Creates a child process of a lower priority (3) and waits for it to exit.
+* The child process creates two child processes of a lower priority (2) and 
+* waits for them to exit. The SchedulerTest01 process does not itself call k_exit().
+*
+*********************************************************************************/
+int SchedulerEntryPoint(void* pArgs)
+{
+    int status = -1, pid1, kidpid = -1;
+    char* testName = "SchedulerTest01";
+    char nameBuffer[512];
+
+    console_output(FALSE, "\n%s: started\n", testName);
+
+    /* Use the -Child naming convention for the child process name. */
+    snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child1", testName);
+
+    pid1 = k_spawn(nameBuffer, SpawnTwoPriorityTwo, nameBuffer, THREADS_MIN_STACK_SIZE, 3);
+    console_output(FALSE, "%s: after spawn of child with pid %d\n", testName, pid1);
+
+    console_output(FALSE, "%s: waiting for child process\n", testName);
+    kidpid = k_wait(&status);
+
+    console_output(FALSE, "%s: exit status for child %d is %d\n", testName, kidpid, status);
+
+    return 0;
+}
+Scheduler02
+
+#include <stdio.h>
+#include "THREADSLib.h"
+#include "SchedulerTesting.h"
+#include "Scheduler.h"
+
+/*********************************************************************************
+*
+* SchedulerTest02
+*
+* Spawns one child process at priority 3.  The child process spawns two
+* children at a higher priority (4).  Those children should preempt their parent
+* at spawn().
+*
+* Expected Output:
+*
+*********************************************************************************/
+int SchedulerEntryPoint(void* pArgs)
+{
+    int status = -1, pid1, kidpid = -1;
+    char* testName = "SchedulerTest02";
+    char nameBuffer[512];
+
+    console_output(FALSE, "\n%s: started\n", testName);
+
+    /* Use the -Child naming convention for the child process name. */
+    snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child1", testName);
+
+    pid1 = k_spawn(nameBuffer, SpawnTwoPriorityFour, nameBuffer, THREADS_MIN_STACK_SIZE, 3);
+    console_output(FALSE, "%s: after spawn of child with pid %d\n", testName, pid1);
+
+    console_output(FALSE, "%s: waiting for child process\n", testName);
+    kidpid = k_wait(&status);
+
+    console_output(FALSE, "%s: exit status for child %d is %d\n", testName, kidpid, status);
+
+    return 0;
+}
+
+Scheduler03
+
+#include <stdio.h>
+#include "THREADSLib.h"
+#include "SchedulerTesting.h"
+#include "Scheduler.h"
+
+/*********************************************************************************
+*
+* SchedulerTest03
+*
+* Spawns a simple child of a lower priority, then signals, and waits. 
+*
+* Expected Output:
+*
+*********************************************************************************/
+int SchedulerEntryPoint(void* pArgs)
+{
+    int status = -1, kidpid;
+    char* testName = "SchedulerTest03";
+    char nameBuffer[512];
+
+    /* spawn one simple child process at a lower priority. */
+    console_output(FALSE, "\n%s: started\n", testName);
+    
+    snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child1", testName);
+
+    kidpid = k_spawn(nameBuffer, SimpleDelayExit, nameBuffer, THREADS_MIN_STACK_SIZE, 1);
+
+    console_output(FALSE, "%s: signaling first child\n", testName);
+    k_kill(kidpid, SIG_TERM);
+    kidpid = k_wait(&status);
+    console_output(FALSE, "%s: exit status for child %d is %d\n", testName, kidpid, status);
+
+    k_exit(0);
+
+    return 0;
+
+}
+Scheduler04
+
+#include <stdio.h>
+#include "THREADSLib.h"
+#include "SchedulerTesting.h"
+#include "Scheduler.h"
+
+/*********************************************************************************
+*
+* SchedulerTest04
+*
+* Spawns max number of processes, dumps the proc table, waits for all, then repeats
+*
+* Expected Output:
+*
+*********************************************************************************/
+int SchedulerEntryPoint(void* pArgs)
+{
+    int status = -1, kidpid = -1;
+    int i, j;
+    char nameBuffer[512];
+    char* testName = "SchedulerTest04";
+    int count = 1;
+
+    console_output(FALSE, "\n%s: started\n", testName);
+    for (j = 0; j < 2; j++)
+    {
+        for (i = 2; i < MAX_PROCESSES; i++)
+        {
+            snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child%d", testName, count++);
+            kidpid = k_spawn(nameBuffer, SimpleDelayExit, nameBuffer, THREADS_MIN_STACK_SIZE, 3);
+            console_output(FALSE, "%s: after spawn of child %d\n", testName, kidpid);
+        }
+
+        display_process_table();
+
+        for (i = 2; i < MAX_PROCESSES; i++)
+        {
+            kidpid = k_wait(&status);
+            console_output(FALSE, "%s: exit status for child %d is %d\n",
+                testName, kidpid, status);
+        }
+    }
+
+    fflush(stdout);
+
+    k_exit(0);
+
+    return 0;
+}
+
+
+Scheduler05
+#include <stdio.h>
+#include "THREADSLib.h"
+#include "SchedulerTesting.h"
+#include "Scheduler.h"
+
+/*********************************************************************************
+*
+* SchedulerTest05
+*
+* Test verifies the time slicing functions by going through the following 
+* logic:
+*    spawn four children 
+*    each child delays in a busy wait and then exits
+*    child with a name that ends in a number divisible by 4 dumps the process table
+*
+* A loop of this logic is repeated 3 times.The proc table should show non-zero values 
+* for CPU time for each of the children since their delays are larger than the 
+* timeslice.
+*
+*********************************************************************************/
+int SchedulerEntryPoint(void* pArgs)
+{
+    int status = -1, kidpid = -1;
+    int i, j;
+    char nameBuffer[1028];
+    char* testName = "SchedulerTest05";
+    int count = 1;
+
+    console_output(FALSE, "\n%s: started\n", testName);
+    for (j = 0; j < 3; j++)
+    {
+        for (i = 2; i < 6; i++)
+        {
+            snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child%d", testName, count++);
+            kidpid = k_spawn(nameBuffer, DelayAndDump, nameBuffer, THREADS_MIN_STACK_SIZE, 3);
+            console_output(FALSE, "%s: after spawn of child with pid %d\n", testName, kidpid);
+        }
+
+        for (i = 2; i < 6; i++)
+        {
+            kidpid = k_wait(&status);
+            console_output(FALSE, "%s: exit status for child %d is %d\n",
+                testName, kidpid, status);
+        }
+    }
+    k_exit(0);
+
+    return 0;
+}
+Scheduler06
+#include <stdio.h>
+#include "THREADSLib.h"
+#include "SchedulerTesting.h"
+#include "Scheduler.h"
+
+int SimpleDelayExit(void* pArgs);
+void SystemDelay(int millisTime);
+int SpawnTwoPriorityFour(char* pArgs);
+int DelayAndDump(char* arg);
+int SignalAndJoinTwoLower(char* strArgs);
+
+
+/*********************************************************************************
+*
+* SchedulerTest06
+*
+* Tests basic signaling features.
+*
+* Expected Output:
+*
+*********************************************************************************/
+int SchedulerEntryPoint(void* pArgs)
+{
+    int status = -1, pid1, kidpid = -1;
+    char* testName = "SchedulerTest06";
+    char nameBuffer[512];
+
+    /* spawn one simple child process at a lower priority. */
+    console_output(FALSE, "\n%s: started\n", testName);
+
+    snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child1", testName);
+    pid1 = k_spawn(nameBuffer, SignalAndJoinTwoLower, nameBuffer, THREADS_MIN_STACK_SIZE, 3);
+    console_output(FALSE, "%s: after spawn of child with pid %d\n", testName, pid1);
+ 
+    display_process_table();
+
+    /* Wait for the child and print the results. */
+    console_output(FALSE, "%s: joining child process\n", testName);
+    kidpid = k_wait(&status);
+    console_output(FALSE, "%s: exit status for child %d is %d\n", testName, kidpid, status);
+
+    k_exit(0);
+
+    return 0;
+}
+Scheduler07
+#include <stdio.h>
+#include "THREADSLib.h"
+#include "SchedulerTesting.h"
+#include "Scheduler.h"
+
+/*********************************************************************************
+*
+* SchedulerTest07
+*
+* Spawns a lower priority process that spawns a higher priority process. 
+*
+* Expected Output:
+*
+*********************************************************************************/
+int SchedulerEntryPoint(void* pArgs)
+{
+    int status = -1, kidpid;
+    char nameBuffer[512];
+    char* testName = "SchedulerTest07";
+
+
+    console_output(FALSE, "\n%s: started\n", testName);
+
+    snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child1", testName);
+    kidpid = k_spawn(nameBuffer, SpawnOnePriorityFour, nameBuffer, THREADS_MIN_STACK_SIZE, 2);
+
+    console_output(FALSE, "%s: waiting for child process\n", testName);
+    kidpid = k_wait(&status);
+    console_output(FALSE, "%s: exit status for child %d is %d\n", testName, kidpid, status);
+
+    k_exit(0);
+
+    return 0;
+
+} Scheduler08
+#include <stdio.h>
+#include "THREADSLib.h"
+#include "SchedulerTesting.h"
+#include "Scheduler.h"
+
+/*********************************************************************************
+*
+* SchedulerTest08
+* 
+* Spawns a process that spawns two lower priority process. 
+* 
+* Expected Output:
+* 
+*********************************************************************************/
+int SchedulerEntryPoint(void *pArgs)
+{
+    int status = -1, pid1, kidpid = -1;
+    char* testName = "SchedulerTest08";
+    char nameBuffer[512];
+
+    /* spawn one simple child process at a lower priority. */
+    console_output(FALSE, "\n%s: started\n", testName);
+
+    snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child1", testName);
+    pid1 = k_spawn(nameBuffer, SpawnTwoPriorityTwo, nameBuffer, THREADS_MIN_STACK_SIZE, 3);
+    console_output(FALSE, "%s: after spawn of child with pid %d\n", testName, pid1);
+
+    /* Wait for the child and print the results. */
+    console_output(FALSE, "%s: waiting for child process\n", testName);
+    kidpid = k_wait(&status);
+    console_output(FALSE, "%s: exit status for child %d is %d\n", testName, kidpid, status);
+
+    k_exit(0);
+
+    return 0;
+}
+Scheduler09
+#include <stdio.h>
+#include "THREADSLib.h"
+#include "SchedulerTesting.h"
+#include "Scheduler.h"
+
+/*********************************************************************************
+*
+* SchedulerTest09
+* 
+* Spawn a child and then quit without waiting.
+* 
+* Expected Output:
+* 
+*********************************************************************************/
+int SchedulerEntryPoint(void *pArgs)
+{
+    int status = -1, pid1, kidpid = -1;
+    char nameBuffer[512];
+    char* testName = "SchedulerTest09";
+
+    /* spawn one simple child process at a lower priority. */
+    console_output(FALSE, "\n%s: started\n", testName);
+
+    snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child1", testName);
+
+    pid1 = k_spawn(nameBuffer, SimpleDelayExit, nameBuffer, THREADS_MIN_STACK_SIZE, 3);
+    console_output(FALSE, "%s: after spawn of child with pid %d\n", testName, pid1);
+
+    k_exit(0);
+
+    return 0;
+}
+Scheduler10
+#include <stdio.h>
+#include "THREADSLib.h"
+#include "SchedulerTesting.h"
+#include "Scheduler.h"
+
+int parentPid = -1;
+
+int JoinParent(char* args);
+
+/*********************************************************************************
+*
+* SchedulerTest10
+* 
+* Spawns a process that attempts to join with it's parent
+* 
+* Expected Output:
+* 
+*********************************************************************************/
+int SchedulerEntryPoint(void *pArgs)
+{
+    int status=-1, pid1, kidpid=-1;
+    char nameBuffer[512];
+    char* testName = "SchedulerTest10";
+
+    /* spawn one simple child process at a lower priority. */
+    console_output(FALSE, "\n%s: started\n", testName);
+
+    parentPid = k_getpid();
+
+    snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child1", testName);
+
+    pid1 = k_spawn(nameBuffer, JoinParent, nameBuffer, THREADS_MIN_STACK_SIZE, 3);
+    console_output(FALSE, "%s: after spawn of child with pid %d\n", testName, pid1);
+
+    /* Wait for the child and print the results. */
+    console_output(FALSE, "%s: waiting for child process\n", testName);
+    kidpid = k_wait(&status);
+    console_output(FALSE, "%s: exit status for child %d is %d\n", testName, kidpid, status);
+
+    k_exit(0);
+
+    return 0;
+}
+
+int JoinParent(char* strArgs)
+{
+    int exitCode;
+
+    console_output(FALSE, "%s: started\n", strArgs);
+    console_output(FALSE, "%s: joining parent process\n", strArgs);
+    k_join(parentPid, &exitCode);
+    console_output(FALSE, "%s: finished joining parent process\n", strArgs);
+
+    k_exit(-3);
+
+    return 0;
+
+}Scheduler11
+#include <stdio.h>
+#include "THREADSLib.h"
+#include "SchedulerTesting.h"
+#include "Scheduler.h"
+
+/*********************************************************************************
+*
+* SchedulerTest11
+* 
+* Tests the spawn function kernel mode validation.
+* 
+* Expected Output:
+* 
+*********************************************************************************/
+int SchedulerEntryPoint(void *pArgs)
+{
+    int status = -1, pid1, kidpid = -1;
+    char nameBuffer[512];
+    char* testName = "SchedulerTest11";
+
+    console_output(FALSE, "\n%s: started\n", testName);
+
+    snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child1", testName);
+
+    /* set the mode to user mode. */
+    set_psr(get_psr() & ~PSR_KERNEL_MODE);
+    pid1 = k_spawn(nameBuffer, SimpleDelayExit, nameBuffer, THREADS_MIN_STACK_SIZE, 3);
+    console_output(FALSE, "%s: after spawn of child with pid %d\n", testName, pid1);
+
+    /* Wait for the child and print the results. */
+    console_output(FALSE, "%s: waiting for child process\n", testName);
+    kidpid = k_wait(&status);
+    console_output(FALSE, "%s: exit status for child %d is %d\n", testName, kidpid, status);
+    k_exit(0);
+
+    return 0; 
+}
+Scheduler12
+#include <stdio.h>
+#include "THREADSLib.h"
+#include "SchedulerTesting.h"
+#include "Scheduler.h"
+
+/*********************************************************************************
+*
+* SchedulerTest12
+*
+* Tests the exit function kernel mode validation.
+*
+* Expected Output:
+*
+*********************************************************************************/
+int SchedulerEntryPoint(void* pArgs)
+{
+    int status = -1, pid1, kidpid = -1;
+    char nameBuffer[512];
+    char* testName = "SchedulerTest12";
+
+    console_output(FALSE, "\n%s: started\n", testName);
+
+    snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child1", testName);
+
+    pid1 = k_spawn(nameBuffer, SimpleDelayExit, nameBuffer, THREADS_MIN_STACK_SIZE, 3);
+    console_output(FALSE, "%s: after spawn of child with pid %d\n", testName, pid1);
+
+    /* Wait for the child and print the results. */
+    console_output(FALSE, "%s: waiting for child process\n", testName);
+    kidpid = k_wait(&status);
+    console_output(FALSE, "%s: exit status for child %d is %d\n", testName, kidpid, status);
+
+    /* set the mode to user mode. */
+    set_psr(get_psr() & ~PSR_KERNEL_MODE);
+
+    k_exit(0);
+    return 0; /* The compiler wants to see this... */
+}
+Scheduler13
+#include <stdio.h>
+#include "THREADSLib.h"
+#include "SchedulerTesting.h"
+#include "Scheduler.h"
+
+
+int SpawnDumpProcess(char* strArgs);
+int DumpProcess(char* strArgs);
+int SignalJoinGlobalPid(char* arg);
+
+/*********************************************************************************
+*
+* SchedulerTest13
+* 
+* This test verifies the status of blocked on join and blocked on wait
+* and tests the correct statuses and return codes for a signaled process.
+*
+*********************************************************************************/
+int SchedulerEntryPoint(void *pArgs)
+{
+    int status = -1, pid1, pid2, kidpid = -1;
+    char* testName = "SchedulerTest13";
+    char nameBuffer[512];
+
+    console_output(FALSE, "\n%s: started\n", testName);
+
+    snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child1", testName);
+    pid1 = k_spawn(nameBuffer, SpawnDumpProcess, nameBuffer, THREADS_MIN_STACK_SIZE, 4);
+    console_output(FALSE, "%s: after spawn of child with pid %d\n", testName, pid1);
+
+    snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child2", testName);
+    pid2 = k_spawn(nameBuffer, SignalJoinGlobalPid, nameBuffer, THREADS_MIN_STACK_SIZE, 3);
+    console_output(FALSE, "%s: after spawn of child with pid %d\n", testName, pid2);
+
+    console_output(FALSE, "%s: waiting for child process\n", testName);
+    kidpid = k_wait(&status);
+    console_output(FALSE, "%s: exit status for child %d is %d\n", testName, kidpid, status);
+
+    console_output(FALSE, "%s: waiting for child process\n", testName);
+    kidpid = k_wait(&status);
+
+    console_output(FALSE, "%s: exit status for child %d is %d\n", testName, kidpid, status);
+    return 0;
+}
+Scheduler14
+#include <stdio.h>
+#include "THREADSLib.h"
+#include "SchedulerTesting.h"
+#include "Scheduler.h"
+
+extern int SpawnDumpProcess(char* strArgs);
+extern int SignalJoinGlobalPid(char* arg);
+extern int gPid;
+
+
+/*********************************************************************************
+*
+* SchedulerTest14
+*
+* This test verifies the status of blocked on join and blocked on wait
+* and tests the correct statuses and return codes for a signaled process.
+*
+*********************************************************************************/
+int SchedulerEntryPoint(void* pArgs)
+{
+    int status = -1, pid2, kidpid = -1;
+    char* testName = "SchedulerTest14";
+    char nameBuffer[512];
+
+    console_output(FALSE, "\n%s: started\n", testName);
+
+    snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child1", testName);
+    gPid = k_spawn(nameBuffer, SpawnDumpProcess, nameBuffer, THREADS_MIN_STACK_SIZE, 4);
+    console_output(FALSE, "%s: after spawn of child with pid %d\n", testName, gPid);
+
+    snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child2", testName);
+    pid2 = k_spawn(nameBuffer, SignalJoinGlobalPid, nameBuffer, THREADS_MIN_STACK_SIZE, 3);
+    console_output(FALSE, "%s: after spawn of child with pid %d\n", testName, pid2);
+
+    console_output(FALSE, "%s: waiting for child process\n", testName);
+    kidpid = k_wait(&status);
+    console_output(FALSE, "%s: exit status for child %d is %d\n", testName, kidpid, status);
+
+    console_output(FALSE, "%s: waiting for child process\n", testName);
+    kidpid = k_wait(&status);
+
+    console_output(FALSE, "%s: exit status for child %d is %d\n", testName, kidpid, status);
+    return 0;
+}
+
+Scheduler15
+#include <stdio.h>
+#include "THREADSLib.h"
+#include "SchedulerTesting.h"
+#include "Scheduler.h"
+
+extern int DumpProcess(char* strArgs);
+int SpawnAndJoinProcess(char* arg);
+int JoinProcess(char* arg);
+
+extern int gPid;
+
+/*********************************************************************************
+*
+* SchedulerTest15
+*
+* This test verifies the status of blocked on join and blocked on wait
+* and tests the correct statuses and return codes for a signaled process.
+*
+*********************************************************************************/
+int SchedulerEntryPoint(void* pArgs)
+{
+    int status = -1, pid2, kidpid = -1;
+    char* testName = "SchedulerTest15";
+    char nameBuffer[512];
+
+    console_output(FALSE, "\n%s: started\n", testName);
+
+    snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child1", testName);
+    gPid = k_spawn(nameBuffer, SpawnAndJoinProcess, nameBuffer, THREADS_MIN_STACK_SIZE, 4);
+    console_output(FALSE, "%s: after spawn of child with pid %d\n", testName, gPid);
+
+    snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child2", testName);
+    pid2 = k_spawn(nameBuffer, JoinProcess, nameBuffer, THREADS_MIN_STACK_SIZE, 3);
+    console_output(FALSE, "%s: after spawn of child with pid %d\n", testName, pid2);
+
+    console_output(FALSE, "%s: waiting for child process\n", testName);
+    kidpid = k_wait(&status);
+    console_output(FALSE, "%s: exit status for child %d is %d\n", testName, kidpid, status);
+
+    console_output(FALSE, "%s: waiting for child process\n", testName);
+    kidpid = k_wait(&status);
+
+    console_output(FALSE, "%s: exit status for child %d is %d\n", testName, kidpid, status);
+    return 0;
+}
+
+int SpawnAndJoinProcess(char* strArgs)
+{
+    int kidpid;
+    int exitCode = 0xff;
+    char nameBuffer[1024];
+
+    if (strArgs != NULL)
+    {
+        console_output(FALSE, "%s: started\n", strArgs);
+        console_output(FALSE, "%s: performing spawn of child\n", strArgs);
+
+        snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child1", strArgs);
+        gPid = k_spawn(nameBuffer, DumpProcess, nameBuffer, THREADS_MIN_STACK_SIZE, 2);
+        console_output(FALSE, "%s: spawn of child returned pid = %d\n", strArgs, gPid);
+
+        console_output(FALSE, "%s: joining %d\n", strArgs, gPid);
+        kidpid = k_join(gPid, &exitCode);
+        console_output(FALSE, "%s: after joining child, pid %d, status = %d\n", strArgs, gPid, exitCode);
+
+        console_output(FALSE, "%s: waiting for %d\n", strArgs, gPid);
+        kidpid = k_wait(&exitCode);
+        console_output(FALSE, "%s: exit status for child %d is %d\n", strArgs, kidpid, exitCode);
+
+    }
+    k_exit(-3);
+
+    return 0;
+}
+
+
+Scheduler16
+#include <stdio.h>
+#include "THREADSLib.h"
+#include "SchedulerTesting.h"
+#include "Scheduler.h"
+
+#define PID_TEST_COUNT 5
+int childPids[PID_TEST_COUNT];
+int VerifyGetPid(char* strArgs);
+/*********************************************************************************
+*
+* SchedulerTest16
+*
+* Verify k_getpid()
+*
+* Expected Output:
+*
+*********************************************************************************/
+int SchedulerEntryPoint(void* args)
+{
+    int status = -1, kidpid = -1;
+    char* testName = "SchedulerTest16";
+    char nameBuffer[512];
+
+    console_output(FALSE, "\n%s: started\n", testName);
+
+    for (int i = 0; i < PID_TEST_COUNT; ++i)
+    {
+        console_output(FALSE, "%s: performing spawn of child\n", testName);
+        snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child%d", testName, i+1);
+        childPids[i] = k_spawn(nameBuffer, VerifyGetPid, nameBuffer, THREADS_MIN_STACK_SIZE, 3);
+        console_output(FALSE, "%s: after spawn of child with pid %d\n", testName, childPids[i]);
+    }
+
+    for (int i = 0; i < PID_TEST_COUNT; ++i)
+    {
+        console_output(FALSE, "%s: waiting for child process\n", testName);
+        kidpid = k_wait(&status);
+        console_output(FALSE, "%s: exit status for child %d is %d\n", testName, kidpid, status);
+    }
+
+    k_exit(0);
+
+    return 0;
+}
+
+int VerifyGetPid(char* strArgs)
+{
+    static int i = 0;
+    int pid;
+    if ((pid = k_getpid()) != childPids[i])
+    {
+        console_output(FALSE, "%s: k_getPid test FAILED by returning %d\n", strArgs, pid);
+    }
+    else
+    {
+        console_output(FALSE, "%s: k_getPid test PASSED by returning %d\n", strArgs, pid);
+
+    }
+    ++i;
+    k_exit(-2);
+
+    return 0;
+}Scheduler17
+#include <stdio.h>
+#include "THREADSLib.h"
+#include "SchedulerTesting.h"
+#include "Scheduler.h"
+
+#define JOIN_TEST_COUNT 10
+
+extern int JoinProcess(char* strArgs); // from test 15
+
+
+/*********************************************************************************
+*
+* SchedulerTest17
+*
+* Spawns one lower priority process then JOIN_TEST_COUNT processes that join
+* with the lower priority process.
+*
+* Expected Output:
+*
+*********************************************************************************/
+int SchedulerEntryPoint(void* pArgs)
+{
+    int status = -1, kidpid = -1;
+    char* testName = "SchedulerTest17";
+    char nameBuffer[512];
+
+    console_output(FALSE, "\n%s: started\n", testName);
+
+    console_output(FALSE, "%s: performing spawn of child\n", testName);
+    snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child1", testName);
+    gPid = k_spawn(nameBuffer, SimpleDelayExit, nameBuffer, THREADS_MIN_STACK_SIZE, 2);
+
+    for (int i = 0; i < JOIN_TEST_COUNT; ++i)
+    {
+        console_output(FALSE, "%s: performing spawn of child\n", testName);
+        snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child%d", testName, i + 2);
+        kidpid = k_spawn(nameBuffer, JoinProcess, nameBuffer, THREADS_MIN_STACK_SIZE, 3);
+        console_output(FALSE, "%s: after spawn of child with pid %d\n", testName, kidpid);
+    }
+
+    for (int i = 0; i < JOIN_TEST_COUNT+1; ++i)
+    {
+        console_output(FALSE, "%s: waiting for child process\n", testName);
+        kidpid = k_wait(&status);
+        console_output(FALSE, "%s: exit status for child %d is %d\n", testName, kidpid, status);
+    }
+
+    k_exit(0);
+
+    return 0;
+
+}
+Scheduler18
+#include <stdio.h>
+#include "THREADSLib.h"
+#include "SchedulerTesting.h"
+#include "Scheduler.h"
+
+/*********************************************************************************
+*
+* SchedulerTest18
+* 
+* Verify stack size checks.
+* 
+* Expected Output:
+* 
+*********************************************************************************/
+int SchedulerEntryPoint(void *pArgs)
+{
+    int status=-1, pid1, kidpid=-1;
+    char nameBuffer[512];
+    char* testName = "SchedulerTest18";
+
+    console_output(FALSE, "\n%s: started\n", testName);
+    snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child1", testName);
+    pid1 = k_spawn(nameBuffer, SimpleDelayExit, nameBuffer, THREADS_MIN_STACK_SIZE -10 , 3);
+    console_output(FALSE, "%s: after spawn of child with pid %d\n", testName, pid1);
+    if (pid1 == -2)
+    {
+        console_output(FALSE, "%s: TEST PASSED\n", testName);
+    }
+    else
+    {
+        console_output(FALSE, "%s: TEST FAILED\n", testName);
+
+        /* Wait for the child and print the results. */
+        console_output(FALSE, "%s: joining child process\n", testName);
+        kidpid = k_wait(&status);
+        console_output(FALSE, "%s: exit status for child %d is %d\n", testName, kidpid, status);
+
+    }
+    k_exit(0);
+
+    return 0;
+}
+Scheduler19
+#include <stdio.h>
+#include "THREADSLib.h"
+#include "SchedulerTesting.h"
+#include "Scheduler.h"
+
+/*********************************************************************************
+*
+* SchedulerTest19
+*
+* Fill process table and verify the return value of -1
+*
+* Expected Output:
+*
+*********************************************************************************/
+int SchedulerEntryPoint(void* args)
+{
+    int status = -1, kidpid = -1;
+    char* testName = "SchedulerTest19";
+    char nameBuffer[512];
+
+    console_output(FALSE, "\n%s: started\n", testName);
+
+    for (int i = 0; i < MAXPROC+2; ++i)
+    {
+        snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child%d", testName, i + 1);
+        kidpid = k_spawn(nameBuffer, SimpleDelayExit, nameBuffer, THREADS_MIN_STACK_SIZE, 3);
+        if (kidpid == -1)
+        {
+            console_output(FALSE, "%s: k_spawn returned -1 at attempt %d\n", testName, i+1);
+        }
+    }
+    for (int i = 0; i < MAXPROC; ++i)
+    {
+        console_output(FALSE, "%s: waiting for child process\n", testName);
+        kidpid = k_wait(&status);
+        console_output(FALSE, "%s: exit status for child %d is %d\n", testName, kidpid, status);
+    }
+
+    k_exit(0);
+
+    return 0;
+}Scheduler20
+#include <stdio.h>
+#include "THREADSLib.h"
+#include "SchedulerTesting.h"
+#include "Scheduler.h"
+
+int JoinSelfTest(char* strArgs); 
+
+/*********************************************************************************
+*
+* SchedulerTest20
+* 
+* Tests a process that tries to join itself
+* 
+* Expected Output:
+* 
+*********************************************************************************/
+int SchedulerEntryPoint(void* pArgs)
+{
+    int status = -1, pid1, kidpid = -1;
+    char nameBuffer[512];
+    char* testName = "SchedulerTest20";
+
+    console_output(FALSE, "\n%s: started\n", testName);
+    snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child1", testName);
+    pid1 = k_spawn(nameBuffer, JoinSelfTest, nameBuffer, THREADS_MIN_STACK_SIZE, 3);
+    console_output(FALSE, "%s: after spawn of child with pid %d\n", testName, pid1);
+
+    console_output(FALSE, "%s: waiting for child process\n", testName);
+    kidpid = k_wait(&status);
+    console_output(FALSE, "%s: exit status for child %d is %d\n", testName, kidpid, status);
+
+    return 0;
+}
+
+int JoinSelfTest(char* strArgs)
+{
+    int pid, status=0, result;
+
+    console_output(FALSE, "%s: started\n", strArgs);
+
+    pid = k_getpid();
+
+    console_output(FALSE, "%s: joining with pid %d (should fail)\n", strArgs, pid);
+    result = k_join(pid, &status);
+    console_output(FALSE, "%s: k_join returned %d\n", strArgs, result);
+
+    k_exit(-2);
+
+    return 0;
+}
+Scheduler21
+#include <stdio.h>
+#include "THREADSLib.h"
+#include "SchedulerTesting.h"
+#include "Scheduler.h"
+
+/*********************************************************************************
+*
+* SchedulerTest21
+* 
+* Verifys priority bounds.
+* 
+* Expected Output:
+* 
+*********************************************************************************/
+int SchedulerEntryPoint(void *pArgs)
+{
+    int status = -1, kidpid = 0;
+    char nameBuffer[512];
+    char* testName = "SchedulerTest21";
+
+    console_output(FALSE, "\n%s: started\n", testName);
+    snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child1", testName);
+    kidpid = k_spawn(nameBuffer, SimpleDelayExit, nameBuffer, THREADS_MIN_STACK_SIZE, -10);
+    if (kidpid == -1)
+    {
+        console_output(FALSE, "%s: Could not spawn process, invalid priority\n", testName);
+    }
+
+    kidpid = k_spawn(nameBuffer, SimpleDelayExit, nameBuffer, THREADS_MIN_STACK_SIZE, 7);
+    if (kidpid == -1)
+    {
+        console_output(FALSE, "%s: Could not spawn process, invalid priority\n", testName);
+    }
+
+    console_output(FALSE, "%s: waiting for child process\n", testName);
+    kidpid = k_wait(&status);
+    console_output(FALSE, "%s: exit status for child %d is %d\n", testName, kidpid, status);
+
+    console_output(FALSE, "%s: waiting for child process\n", testName);
+    kidpid = k_wait(&status);
+    console_output(FALSE, "%s: exit status for child %d is %d\n", testName, kidpid, status);
+
+    return 0;
+}
+Scheduler22
+#include <stdio.h>
+#include "THREADSLib.h"
+#include "SchedulerTesting.h"
+#include "Scheduler.h"
+
+int SpawnAndUnblock(char* strArgs);
+
+/*********************************************************************************
+*
+* SchedulerTest22
+* 
+* Tests block and unblock.
+* 
+* Expected Output:
+* 
+*********************************************************************************/
+int SchedulerEntryPoint(void *pArgs)
+{
+    int status = -1, pid1, kidpid = -1;
+    char nameBuffer[512];
+    char* testName = "SchedulerTest22";
+
+    console_output(FALSE, "\n%s: started\n", testName);
+    snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child1", testName);
+    pid1 = k_spawn(nameBuffer, SpawnAndUnblock, nameBuffer, THREADS_MIN_STACK_SIZE, 2);
+    console_output(FALSE, "%s: after spawn of child with pid %d\n", testName, pid1);
+
+    /* Wait for the child and print the results. */
+    console_output(FALSE, "%s: waiting for child process\n", testName);
+    kidpid = k_wait(&status);
+    console_output(FALSE, "%s: exit status for child %d is %d\n", testName, kidpid, status);
+
+    k_exit(0);
+
+    return 0;
+}
+
+int SpawnAndUnblock(char* strArgs)
+{
+    int pids[BLOCK_UNBLOCK_COUNT], status = 0;
+    char nameBuffer[512];
+
+    console_output(FALSE, "%s: started\n", strArgs);
+
+    for (int i = 0; i < 3; ++i)
+    {
+        console_output(FALSE, "%s: performing spawn of child\n", strArgs);
+        snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child%d", strArgs, i + 1);
+        pids[i] = k_spawn(nameBuffer, SimpleBockExit, nameBuffer, THREADS_MIN_STACK_SIZE, 3);
+        console_output(FALSE, "%s: after spawn of child with pid %d\n", strArgs, pids[i]);
+    }
+
+    display_process_table();
+
+    for (int i = 0; i < 3; ++i)
+    {
+        console_output(FALSE, "%s: Unblocking process %d\n", strArgs, pids[i]);
+        unblock(pids[i]);
+    }
+
+    for (int i = 0; i < 3; ++i)
+    {
+        int pid;
+        console_output(FALSE, "%s: waiting for child process\n", strArgs);
+        pid = k_wait(&status);
+        console_output(FALSE, "%s: exit status for child %d is %d\n", strArgs, pid, status);
+    }
+
+    k_exit(-2);
+
+    return 0;
+}Scheduler23
+#include <stdio.h>
+#include "THREADSLib.h"
+#include "SchedulerTesting.h"
+#include "Scheduler.h"
+
+int SpawnTwoPriorities(char* strArgs);
+int UnblockTwoPriorities(char* strArgs);
+extern int pids[];
+
+/*********************************************************************************
+*
+* SchedulerTest23
+*
+* Tests block and unblock.
+*
+* Expected Output:
+*
+*********************************************************************************/
+int SchedulerEntryPoint(void* pArgs)
+{
+    int status = -1, pid1, kidpid = -1;
+    char nameBuffer[512];
+    char* testName = "SchedulerTest23";
+
+    console_output(FALSE, "\n%s: started\n", testName);
+    snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child1", testName);
+    pid1 = k_spawn(nameBuffer, SpawnTwoPriorities, nameBuffer, THREADS_MIN_STACK_SIZE, 2);
+    console_output(FALSE, "%s: after spawn of child with pid %d\n", testName, pid1);
+
+    /* Wait for the child and print the results. */
+    console_output(FALSE, "%s: joining child process\n", testName);
+    kidpid = k_wait(&status);
+    console_output(FALSE, "%s: exit status for child %d is %d\n", testName, kidpid, status);
+
+    k_exit(0);
+
+    return 0;
+}
+
+
+int SpawnTwoPriorities(char* strArgs)
+{
+    int kidpid, status = 0;
+    char nameBuffer[512];
+
+    console_output(FALSE, "%s: started\n", strArgs);
+
+    for (int i = 0; i < BLOCK_UNBLOCK_COUNT; ++i)
+    {
+        console_output(FALSE, "%s: performing spawn of child\n", strArgs);
+        snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child%d", strArgs, i + 1);
+        pids[i] = k_spawn(nameBuffer, SimpleBockExit, nameBuffer, THREADS_MIN_STACK_SIZE, 3);
+        console_output(FALSE, "%s: after spawn of child with pid %d\n", strArgs, pids[i]);
+    }
+
+    for (int i = BLOCK_UNBLOCK_COUNT; i < BLOCK_UNBLOCK_COUNT*2; ++i)
+    {
+        console_output(FALSE, "%s: performing spawn of child\n", strArgs);
+        snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child%d", strArgs, i + 1);
+        pids[i] = k_spawn(nameBuffer, SimpleBockExit, nameBuffer, THREADS_MIN_STACK_SIZE, 4);
+        console_output(FALSE, "%s: after spawn of child with pid %d\n", strArgs, pids[i]);
+    }
+
+    display_process_table();
+
+    console_output(FALSE, "%s: performing spawn of child\n", strArgs);
+    snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child%d", strArgs, BLOCK_UNBLOCK_COUNT * 2);
+    kidpid = k_spawn(nameBuffer, UnblockTwoPriorities, nameBuffer, THREADS_MIN_STACK_SIZE, 5);
+    console_output(FALSE, "%s: after spawn of child with pid %d\n", strArgs, kidpid);
+
+    console_output(FALSE, "%s: waiting for child process\n", strArgs);
+    kidpid = k_wait(&status);
+    console_output(FALSE, "%s: exit status for child %d is %d\n", strArgs, kidpid, status);
+
+    for (int i = 0; i < BLOCK_UNBLOCK_COUNT * 2; ++i)
+    {
+        console_output(FALSE, "%s: waiting for child process\n", strArgs);
+        kidpid = k_wait(&status);
+        console_output(FALSE, "%s: exit status for child %d is %d\n", strArgs, kidpid, status);
+    }
+
+    k_exit(-2);
+
+    return 0;
+}
+
+Scheduler24
+#include <stdio.h>
+#include "THREADSLib.h"
+#include "SchedulerTesting.h"
+#include "Scheduler.h"
+
+int SpawnTwoPrioritiesReversed(char* strArgs);
+int UnblockTwoPriorities(char* strArgs);
+#define BLOCK_UNBLOCK_COUNT 4
+extern int pids[BLOCK_UNBLOCK_COUNT];
+
+/*********************************************************************************
+*
+* SchedulerTest24
+*
+* Tests block and unblock.
+*
+* Expected Output:
+*
+*********************************************************************************/
+int SchedulerEntryPoint(void* pArgs)
+{
+    int status = -1, pid1, kidpid = -1;
+    char nameBuffer[512];
+    char* testName = "SchedulerTest24";
+
+    console_output(FALSE, "\n%s: started\n", testName);
+    snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child1", testName);
+    pid1 = k_spawn(nameBuffer, SpawnTwoPrioritiesReversed, nameBuffer, THREADS_MIN_STACK_SIZE, 2);
+    console_output(FALSE, "%s: after spawn of child with pid %d\n", testName, pid1);
+
+    /* Wait for the child and print the results. */
+    console_output(FALSE, "%s: joining child process\n", testName);
+    kidpid = k_wait(&status);
+    console_output(FALSE, "%s: exit status for child %d is %d\n", testName, kidpid, status);
+
+    k_exit(0);
+
+    return 0;
+}
+
+
+int SpawnTwoPrioritiesReversed(char* strArgs)
+{
+    int kidpid, status = 0;
+    char nameBuffer[512];
+
+    console_output(FALSE, "%s: started\n", strArgs);
+
+    for (int i = 0; i < BLOCK_UNBLOCK_COUNT; ++i)
+    {
+        console_output(FALSE, "%s: performing spawn of child\n", strArgs);
+        snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child%d", strArgs, i + 1);
+        pids[i] = k_spawn(nameBuffer, SimpleBockExit, nameBuffer, THREADS_MIN_STACK_SIZE, 4);
+        console_output(FALSE, "%s: after spawn of child with pid %d\n", strArgs, pids[i]);
+    }
+
+    for (int i = BLOCK_UNBLOCK_COUNT; i < BLOCK_UNBLOCK_COUNT * 2; ++i)
+    {
+        console_output(FALSE, "%s: performing spawn of child\n", strArgs);
+        snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child%d", strArgs, i + 1);
+        pids[i] = k_spawn(nameBuffer, SimpleBockExit, nameBuffer, THREADS_MIN_STACK_SIZE, 3);
+        console_output(FALSE, "%s: after spawn of child with pid %d\n", strArgs, pids[i]);
+    }
+
+    display_process_table();
+
+    console_output(FALSE, "%s: performing spawn of child\n", strArgs);
+    snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child%d", strArgs, BLOCK_UNBLOCK_COUNT * 2);
+    kidpid = k_spawn(nameBuffer, UnblockTwoPriorities, nameBuffer, THREADS_MIN_STACK_SIZE, 5);
+    console_output(FALSE, "%s: after spawn of child with pid %d\n", strArgs, kidpid);
+
+    console_output(FALSE, "%s: waiting for child process\n", strArgs);
+    kidpid = k_wait(&status);
+    console_output(FALSE, "%s: exit status for child %d is %d\n", strArgs, kidpid, status);
+
+    for (int i = 0; i < BLOCK_UNBLOCK_COUNT * 2; ++i)
+    {
+        console_output(FALSE, "%s: waiting for child process\n", strArgs);
+        kidpid = k_wait(&status);
+        console_output(FALSE, "%s: exit status for child %d is %d\n", strArgs, kidpid, status);
+    }
+
+    k_exit(-2);
+
+    return 0;
+}
+Scheduler25
+#include <stdio.h>
+#include "THREADSLib.h"
+#include "SchedulerTesting.h"
+#include "Scheduler.h"
+
+/*********************************************************************************
+*
+* SchedulerTest08
+* 
+* Simple test case that creates one child process.
+* 
+* Expected Output:
+* 
+*********************************************************************************/
+int SchedulerEntryPoint(void *pArgs)
+{
+    int status=-1, pid1, kidpid=-1;
+    char* testName = "SchedulerTest25";
+
+    /* spawn one simple child process at a lower priority. */
+    console_output(FALSE, "\n%s: started\n", testName);
+    pid1 = k_spawn("P1-Child1", SimpleDelayExit, "P1-Child1", THREADS_MIN_STACK_SIZE, 3);
+    console_output(FALSE, "%s: after spawn of child with pid %d\n", testName, pid1);
+
+    /* Wait for the child and print the results. */
+    console_output(FALSE, "%s: joining child process\n", testName);
+    kidpid = k_wait(&status);
+    console_output(FALSE, "%s: exit status for child %d is %d\n", testName, kidpid, status);
+
+    k_exit(0);
+
+    return 0;
+}
+Scheduler26
+#include <stdio.h>
+#include "THREADSLib.h"
+#include "SchedulerTesting.h"
+#include "Scheduler.h"
+
+int SpawnTwoDifferentPriorities(char* strArgs);
+int SpawnJoiner(char* strArgs);
+extern int pidToJoin;
+
+/*********************************************************************************
+*
+* SchedulerTest26
+*
+*   Tests join by trying to join with a process that has already exited.
+*
+*********************************************************************************/
+int SchedulerEntryPoint(void* pArgs)
+{
+    int status = -1, kidpid;
+    char nameBuffer[512];
+    char* testName = "SchedulerTest26";
+
+    console_output(FALSE, "\n%s: started\n", testName);
+
+    snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child1", testName);
+    pidToJoin = k_spawn(nameBuffer, SimpleDelayExit, nameBuffer, THREADS_MIN_STACK_SIZE, 4);
+    console_output(FALSE, "%s: after spawn of child with pid %d\n", testName, pidToJoin);
+
+    snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child2", testName);
+    kidpid = k_spawn(nameBuffer, SpawnJoiner, nameBuffer, THREADS_MIN_STACK_SIZE, 2);
+    console_output(FALSE, "%s: after spawn of child with pid %d\n", testName, kidpid);
+
+    console_output(FALSE, "%s: waiting for child process\n", testName);
+    kidpid = k_wait(&status);
+    console_output(FALSE, "%s: exit status for child %d is %d\n", testName, kidpid, status);
+
+    console_output(FALSE, "%s: waiting for child process\n", testName);
+    kidpid = k_wait(&status);
+    console_output(FALSE, "%s: exit status for child %d is %d\n", testName, kidpid, status);
+
+    k_exit(0);
+
+    return 0;
+}
+Scheduler27
+#include <stdio.h>
+#include "THREADSLib.h"
+#include "SchedulerTesting.h"
+#include "Scheduler.h"
+
+int SpawnTwoDifferentPriorities(char* strArgs);
+int SpawnJoiner(char* strArgs);
+int pidToJoin;
+
+/*********************************************************************************
+*
+* SchedulerTest27
+*
+*
+* Expected Output:
+*
+*********************************************************************************/
+int SchedulerEntryPoint(void* pArgs)
+{
+    int status = -1, kidpid;
+    char nameBuffer[512];
+    char* testName = "SchedulerTest27";
+
+    console_output(FALSE, "\n%s: started\n", testName);
+
+    snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child1", testName);
+    kidpid = k_spawn(nameBuffer, SpawnOnePriorityFour, nameBuffer, THREADS_MIN_STACK_SIZE, 2);
+    console_output(FALSE, "%s: after spawn of child with pid %d\n", testName, kidpid);
+
+    snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child2", testName);
+    kidpid = k_spawn(nameBuffer, SpawnJoiner, nameBuffer, THREADS_MIN_STACK_SIZE, 2);
+    console_output(FALSE, "%s: after spawn of child with pid %d\n", testName, kidpid);
+
+    snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child3", testName);
+    pidToJoin = k_spawn(nameBuffer, SpawnTwoDifferentPriorities, nameBuffer, THREADS_MIN_STACK_SIZE, 2);
+    console_output(FALSE, "%s: after spawn of child with pid %d\n", testName, pidToJoin);
+
+
+    console_output(FALSE, "%s: waiting for child process\n", testName);
+    kidpid = k_wait(&status);
+    console_output(FALSE, "%s: exit status for child %d is %d\n", testName, kidpid, status);
+
+    console_output(FALSE, "%s: waiting for child process\n", testName);
+    kidpid = k_wait(&status);
+    console_output(FALSE, "%s: exit status for child %d is %d\n", testName, kidpid, status);
+
+    console_output(FALSE, "%s: waiting for child process\n", testName);
+    kidpid = k_wait(&status);
+    console_output(FALSE, "%s: exit status for child %d is %d\n", testName, kidpid, status);
+
+    k_exit(0);
+
+    return 0;
+}
+
+int SpawnTwoDifferentPriorities(char* strArgs)
+{
+    int kidpid;
+    int status = 0xff;
+    char nameBuffer[1024];
+
+    if (strArgs != NULL)
+    {
+        console_output(FALSE, "%s: started\n", strArgs);
+        console_output(FALSE, "%s: performing spawn of first child\n", strArgs);
+
+        snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child1", strArgs);
+        kidpid = k_spawn(nameBuffer, SimpleDelayExit, nameBuffer, THREADS_MIN_STACK_SIZE, 3);
+        console_output(FALSE, "%s: spawn of first child returned pid = %d\n", strArgs, kidpid);
+
+        snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child2", strArgs);
+        console_output(FALSE, "%s: performing spawn of second child\n", strArgs);
+        kidpid = k_spawn(nameBuffer, SimpleDelayExit, nameBuffer, THREADS_MIN_STACK_SIZE, 4);
+        console_output(FALSE, "%s: spawn of second child returned pid = %d\n", strArgs, kidpid);
+
+        console_output(FALSE, "%s: performing first wait\n", strArgs);
+        kidpid = k_wait(&status);
+        console_output(FALSE, "%s: exit status for child %d is %d\n", strArgs,
+            kidpid, status);
+
+        console_output(FALSE, "%s: performing second wait\n", strArgs);
+        kidpid = k_wait(&status);
+        console_output(FALSE, "%s: exit status for child %d is %d\n", strArgs,
+            kidpid, status);
+    }
+    k_exit(-3);
+
+    return 0;
+}
+Scheduler28
+#include <stdio.h>
+#include "THREADSLib.h"
+#include "SchedulerTesting.h"
+#include "Scheduler.h"
+
+int SpawnTwoDifferentPriorities(char* strArgs);
+extern int SpawnJoiner(char* strArgs);  // from test27
+extern int pidToJoin;
+
+/*********************************************************************************
+*
+* SchedulerTest28
+*
+*
+* Expected Output:
+*
+*********************************************************************************/
+int SchedulerEntryPoint(void* pArgs)
+{
+    int status = -1, kidpid;
+    char nameBuffer[512];
+    char* testName = "SchedulerTest28";
+
+    console_output(FALSE, "\n%s: started\n", testName);
+
+    snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child1", testName);
+    kidpid = k_spawn(nameBuffer, SimpleDelayExit, nameBuffer, THREADS_MIN_STACK_SIZE, 4);
+    console_output(FALSE, "%s: after spawn of child with pid %d\n", testName, kidpid);
+
+    snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child2", testName);
+    kidpid = k_spawn(nameBuffer, SpawnJoiner, nameBuffer, THREADS_MIN_STACK_SIZE, 3);
+    console_output(FALSE, "%s: after spawn of child with pid %d\n", testName, kidpid);
+
+    snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child3", testName);
+    pidToJoin = k_spawn(nameBuffer, SpawnOnePriorityOne, nameBuffer, THREADS_MIN_STACK_SIZE, 2);
+    console_output(FALSE, "%s: after spawn of child with pid %d\n", testName, pidToJoin);
+
+
+    console_output(FALSE, "%s: waiting for child process\n", testName);
+    kidpid = k_wait(&status);
+    console_output(FALSE, "%s: exit status for child %d is %d\n", testName, kidpid, status);
+
+    console_output(FALSE, "%s: waiting for child process\n", testName);
+    kidpid = k_wait(&status);
+    console_output(FALSE, "%s: exit status for child %d is %d\n", testName, kidpid, status);
+
+    console_output(FALSE, "%s: waiting for child process\n", testName);
+    kidpid = k_wait(&status);
+    console_output(FALSE, "%s: exit status for child %d is %d\n", testName, kidpid, status);
+
+    k_exit(0);
+
+    return 0;
+}
+Scheduler29
+#include <stdio.h>
+#include "THREADSLib.h"
+#include "SchedulerTesting.h"
+#include "Scheduler.h"
+
+
+int RunUntilSignaled(char* strArgs);
+
+/*********************************************************************************
+*
+* SchedulerTest29
+*
+* Test verifies the time slicing functions by starting a process that 
+* runs until signaled and then goes through the following
+* logic:
+*    spawn four children
+*    each child delays in a busy wait and then exits
+*    the child with a name that is divisible by 4 dumps the process table
+*
+* A loop of this logic is repeated 3 times.The proc table should show non-zero values for
+* CPU time for each of the children since their delays are larger than the timeslice.
+*
+*********************************************************************************/
+int SchedulerEntryPoint(void* pArgs)
+{
+    int status = -1, kidpid = -1, longRunningPid;
+    int i, j;
+    char nameBuffer[1028];
+    char* testName = "SchedulerTest29";
+    int count = 1;
+
+    console_output(FALSE, "\n%s: started\n", testName);
+
+    snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child%d", testName, count++);
+    longRunningPid = k_spawn(nameBuffer, RunUntilSignaled, nameBuffer, THREADS_MIN_STACK_SIZE, 3);
+    console_output(FALSE, "%s: after spawn of child with pid %d\n", testName, longRunningPid);
+
+    for (j = 0; j < 3; j++)
+    {
+        for (i = 2; i < 6; i++)
+        {
+            snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child%d", testName, count++);
+            kidpid = k_spawn(nameBuffer, DelayAndDump, nameBuffer, THREADS_MIN_STACK_SIZE, 3);
+            console_output(FALSE, "%s: after spawn of child with pid %d\n", testName, kidpid);
+        }
+
+        for (i = 2; i < 6; i++)
+        {
+            kidpid = k_wait(&status);
+            console_output(FALSE, "%s: exit status for child %d is %d\n",
+                testName, kidpid, status);
+        }
+    }
+
+    /* terminate and wait for the first process.*/
+    k_kill(longRunningPid, SIG_TERM);
+    kidpid = k_wait(&status);
+    console_output(FALSE, "%s: exit status for child %d is %d\n",
+        testName, kidpid, status);
+
+    k_exit(0);
+
+    return 0;
+}
+
+
+int RunUntilSignaled(char* strArgs)
+{
+
+    if (strArgs != NULL)
+    {
+        console_output(FALSE, "%s: started\n", strArgs);
+        console_output(FALSE, "%s: performing spawn of first child\n", strArgs);
+
+        while (!signaled());
+    }
+    k_exit(-3);
+
+    return 0;
+}Scheduler30
+#include <stdio.h>
+#include "THREADSLib.h"
+#include "SchedulerTesting.h"
+#include "Scheduler.h"
+
+int DelayLongAndExit(char* strArgs);
+
+/*********************************************************************************
+*
+* SchedulerTest30
+*
+* Test of the readTime function
+*
+*********************************************************************************/
+int SchedulerEntryPoint(void* pArgs)
+{
+    int status = -1, kidpid = -1;
+    char* testName = "SchedulerTest30";
+    char nameBuffer[512];
+
+    console_output(FALSE, "\n%s: started\n", testName);
+
+    for (int i = 0; i < 3; ++i)
+    {
+        console_output(FALSE, "%s: performing spawn of child\n", testName);
+        snprintf(nameBuffer, sizeof(nameBuffer), "%s-Child%d", testName, i + 1);
+        kidpid = k_spawn(nameBuffer, DelayLongAndExit, nameBuffer, THREADS_MIN_STACK_SIZE, 3);
+        console_output(FALSE, "%s: after spawn of child with pid %d\n", testName, kidpid);
+    }
+
+    for (int i = 0; i < 3; ++i)
+    {
+        console_output(FALSE, "%s: waiting for child process\n", testName);
+        kidpid = k_wait(&status);
+        console_output(FALSE, "%s: exit status for child %d is %d\n", testName, kidpid, status);
+    }
+    k_exit(0);
+
+    return 0;
+}
+
+
+/*********************************************************************************
+*
+* DelayLongAndExit
+*
+* Delays based on the child number.
+*
+*********************************************************************************/
+int DelayLongAndExit(char* strArgs)
+{
+    int testNumber; 
+
+    if (strArgs != NULL)
+    {
+        int delayTime, readTimeResult;
+
+        // Get the test number
+        testNumber = GetChildNumber(strArgs);
+
+        // calculate the delay
+        delayTime = testNumber * 1000;
+
+        console_output(FALSE, "%s: started\n", strArgs);
+        
+        SystemDelay(delayTime);
+
+        if (strlen(strArgs) <= 0)
+        {
+            console_output(FALSE, "NO STRING: %d, %d\n", k_getpid(), testNumber);
+            display_process_table();
+            ExitProcess(0);
+        }
+        console_output(FALSE, "%s: calling readTime\n", strArgs);
+        readTimeResult = read_time();
+        console_output(FALSE, "%s: readTime returned %d\n", strArgs, readTimeResult);
+
+        console_output(FALSE, "%s: quitting\n", strArgs);
+
+    }
+
+    k_exit(-3);
+
+    return 0;
+}Scheduler31
+
+#include <stdio.h>
+#include "THREADSLib.h"
+#include "SchedulerTesting.h"
+#include "Scheduler.h"
+
+/*********************************************************************************
+*
+* SchedulerTest31
+*
+* Test block with an out of range value.
+*
+*********************************************************************************/
+int SchedulerEntryPoint(void* pArgs)
+{
+    char* testName = "SchedulerTest31";
+
+    console_output(FALSE, "\n%s: started\n", testName);
+
+    /* Use the -Child naming convention for the child process name. */
+    console_output(FALSE, "%s: blocking with a value of 6\n", testName);
+    block(6);
+
+    k_exit(0);
+
+    return 0;
+}
+

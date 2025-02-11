@@ -1,27 +1,33 @@
-
 #define _CRT_SECURE_NO_WARNINGS
 
 #include <stdio.h>
+#include <string.h>
+#include <stdarg.h>
 #include "THREADSLib.h"
 #include "Scheduler.h"
 #include "Processes.h"
 
 Process processTable[MAX_PROCESSES];
-Process *runningProcess = NULL;
+Process* runningProcess = NULL;
 
-Process* readyList[HIGHEST_PRIORITY + 1]; // One list per priority
+Process* readyList[HIGHEST_PRIORITY + 1]; // Still using your simple one-pointer-per-priority model
 int nextPid = 1;
 int debugFlag = 0;
 
 static int watchdog(char*);
 static inline void disableInterrupts();
 void dispatcher();
-static int launch(void *);
+static int launch(void*);
 static void check_deadlock();
 static void DebugConsole(char* format, ...);
 
 static int GetNextPid();
 void AddToReadyList(Process* pProcess);
+
+/* --- New helper function declarations --- */
+static void AddToExitingChildren(Process* parent, Process* child);
+static void RemoveChildFromList(Process* parent, Process* child);
+
 static int processCount;
 int booting = 1;
 
@@ -30,43 +36,30 @@ extern int SchedulerEntryPoint(void* pArgs);
 int check_io_scheduler();
 check_io_function check_io;
 
-
 /*************************************************************************
    bootstrap()
-
-   Purpose - This is the first function called by THREADS on startup.
-
-             The function must setup the OS scheduler and primitive
-             functionality and then spawn the first two processes.  
-             
-             The first two process are the watchdog process 
-             and the startup process SchedulerEntryPoint.  
-             
-             The statup process is used to initialize additional layers
-             of the OS.  It is also used for testing the scheduler 
-             functions.
-
-   Parameters - Arguments *pArgs - these arguments are unused at this time.
-
-   Returns - The function does not return!
-
-   Side Effects - The effects of this function is the launching of the kernel.
-
- *************************************************************************/
+*************************************************************************/
 int bootstrap(void *pArgs)
 {
-    int result; /* value returned by call to spawn() */
+    int result;
 
-    /* set this to the scheduler version of this function.*/
     check_io = check_io_scheduler;
 
-    /* Initialize the process table. */
+    /* Initialize the process table */
+    for (int i = 0; i < MAX_PROCESSES; i++) {
+        memset(&processTable[i], 0, sizeof(Process));
+        processTable[i].status = STATUS_EMPTY;
+    }
+    processCount = 0;
 
-    /* Initialize the Ready list, etc. */
+    /* Initialize the ready list */
+    for (int i = 0; i <= HIGHEST_PRIORITY; i++) {
+        readyList[i] = NULL;
+    }
 
-    /* Initialize the clock interrupt handler */
+    /* Initialize clock interrupt handler, etc. */
 
-    /* startup a watchdog process */
+    /* Spawn watchdog process */
     result = k_spawn("watchdog", watchdog, NULL, THREADS_MIN_STACK_SIZE, LOWEST_PRIORITY);
     if (result < 0)
     {
@@ -76,7 +69,7 @@ int bootstrap(void *pArgs)
 
     booting = 0;
 
-    /* start the test process, which is the main for each test program.  */
+    /* Spawn the test process */
     result = k_spawn("Scheduler", SchedulerEntryPoint, NULL, 2 * THREADS_MIN_STACK_SIZE, HIGHEST_PRIORITY);
     if (result < 0)
     {
@@ -84,269 +77,221 @@ int bootstrap(void *pArgs)
         stop(1);
     }
 
-    /* Initialized and ready to go!! */
-
-    /* This should never return since we are not a real process. */
-
     stop(-3);
     return 0;
+}
 
+/*************************************************************************
+   check_kernel_mode()
+*************************************************************************/
+static inline void check_kernel_mode() {
+    if ((get_psr() & PSR_KERNEL_MODE) == 0) {
+        console_output(FALSE, "Kernel mode expected, but function called in user mode.\n");
+        stop(1);
+    }
 }
 
 /*************************************************************************
    k_spawn()
-
-   Purpose - spawns a new process.
-   
-             Finds an empty entry in the process table and initializes
-             information of the process.  Updates information in the
-             parent process to reflect this child process creation.
-
-   Parameters - the process's entry point function, the stack size, and
-                the process's priority.
-
-   Returns - The Process ID (pid) of the new child process 
-             The function must return if the process cannot be created.
-
-************************************************************************ */
-int k_spawn(char* name, int (*entryPoint)(void *), void* arg, int stacksize, int priority)
+*************************************************************************/
+int k_spawn(char* name, int (*entryPoint)(void*), void* arg, int stacksize, int priority)
 {
-    int proc_slot;
-    int myPid;
-    struct _process* pNewProc;
+    check_kernel_mode();
 
-    DebugConsole("spawn(): creating process %s\n", name);
-
-    disableInterrupts();
-
-    /* Validate all of the parameters, starting with the name. */
-    if (name == NULL)
-    {
-        console_output(debugFlag, "spawn(): Name value is NULL.\n");
+    if (priority < LOWEST_PRIORITY || priority > HIGHEST_PRIORITY) {
+        console_output(FALSE, "spawn(): Priority out of range.\n");
         return -1;
     }
-    if (strlen(name) >= (MAXNAME - 1))
-    {
-        console_output(debugFlag, "spawn(): Process name is too long.  Halting...\n");
-        stop( 1);
+    if (stacksize < THREADS_MIN_STACK_SIZE) {
+        console_output(FALSE, "spawn(): Stack size is too small\n");
+        return -2;
     }
 
+    int slot = -1;
+    for (int i = 0; i < MAX_PROCESSES; i++) {
+        if (processTable[i].status == STATUS_EMPTY) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot == -1) {
+        console_output(FALSE, "spawn(): No free PCB slots, returning -1\n");
+        return -1;
+    }
 
-    /* Find an empty slot in the process table */
-    int i;
-    for (i = nextPid; processTable[i].status != 0; ++i);
-
-    myPid = GetNextPid();
-    //myPid = 2; // Changing this to 3 causes access violation inside dispatcher
-    
-    proc_slot = myPid % MAX_PROCESSES;
-    //proc_slot = 1;  // just use 1 for now!
-    pNewProc = &processTable[proc_slot];
-
-    /* Setup the entry in the process table. */
+    Process* pNewProc = &processTable[slot];
+    memset(pNewProc, 0, sizeof(Process));
     strcpy(pNewProc->name, name);
-
-    if (arg != NULL)
-    {
-        strcpy(pNewProc->startArgs, (char*)arg);
-    }
-
-    pNewProc->pid = myPid;
+    if (arg)
+        strncpy(pNewProc->startArgs, (char*)arg, MAXARG - 1);
+    pNewProc->pid = GetNextPid();
     pNewProc->priority = priority;
-    pNewProc->pParent = runningProcess;
-    pNewProc->status = STATUS_READY;
     pNewProc->entryPoint = entryPoint;
+    pNewProc->status = STATUS_READY;
+    pNewProc->exitCode = 0;
 
-    /* If there is a parent process,add this to the list of children. */
-    if (runningProcess != NULL)
-    {
+    /* Link to parent's child list and update childCount */
+    pNewProc->pParent = runningProcess;
+    if (runningProcess) {
+       pNewProc->nextSiblingProcess = runningProcess->pChildren;
+       runningProcess->pChildren = pNewProc;
+       runningProcess->childCount++;
     }
 
-    /* Add the process to the ready list. */
-    AddToReadyList(pNewProc);
-
-    /* Initialize context for this process, but use launch function pointer for
-     * the initial value of the process's program counter (PC)
-    */
     pNewProc->context = context_initialize(launch, stacksize, arg);
+
+    /* Add to ready list using existing function */
+    AddToReadyList(pNewProc);
 
     if (!booting)
         dispatcher();
 
     return pNewProc->pid;
+}
 
-
-} /* spawn */
-
-/**************************************************************************
-   Name - launch
-
-   Purpose - Utility function that makes sure the environment is ready,
-             such as enabling interrupts, for the new process.  
-
-   Parameters - none
-
-   Returns - nothing
+/*************************************************************************
+   launch()
 *************************************************************************/
-static int launch(void *args)
+static int launch(void* args)
 {
     int resultCode;
     DebugConsole("launch(): started: %s\n", runningProcess->name);
 
     /* TODO: Enable interrupts */
 
-
-    /* Call the function passed to spawn and capture its return value */
     resultCode = runningProcess->entryPoint(runningProcess->startArgs);
 
     DebugConsole("Process %d returned to launch\n", runningProcess->pid);
 
-    /* Stop the process gracefully */
     k_exit(resultCode);
 
     return 0;
-} 
+}
 
-/**************************************************************************
-   Name - k_wait
-
-   Purpose - Wait for a child process to quit.  Return right away if
-             a child has already quit.
-
-   Parameters - Output parameter for the child's exit code. 
-
-   Returns - the pid of the quitting child, or
-        -4 if the process has no children
-        -5 if the process was signaled in the join
-
-************************************************************************ */
-int k_wait(int* code)
-{
-    int result = 0;
-    Process* pExitingChild;
-
-    // Change my state to BLOCKED
-    runningProcess->status = STATUS_BLOCKED_WAIT;
-
-    dispatcher();
-
-    // Get the exit code of the child
-    // TODO: Pop first child off of exiting child list
-    pExitingChild = runningProcess->pExitingChildren;
-
-    if (pExitingChild != NULL)
-    {
-        *code = pExitingChild->exitCode;
-        result = pExitingChild->pid;
-    }
-
-    // Clean up after the child
-    memset(pExitingChild, 0, sizeof(Process));
-
-    return result;
-
-} 
-
-/**************************************************************************
-   Name - k_exit
-
-   Purpose - Exits a process and coordinates with the parent for cleanup 
-             and return of the exit code.
-
-   Parameters - the code to return to the grieving parent
-
-   Returns - nothing
-   
+/*************************************************************************
+   k_exit()
 *************************************************************************/
 void k_exit(int code)
 {
-    Process* pParent;
+    check_kernel_mode();
 
-    pParent = runningProcess->pParent;
+    Process* pParent = runningProcess->pParent;
+    runningProcess->exitCode = code;
+    runningProcess->status = STATUS_EXITED;
 
-    // Wake up the parent process only if they're in k_wait
     if (pParent != NULL)
     {
+        /* Decrement parent's active child count */
+        if (pParent->childCount > 0)
+            pParent->childCount--;
+
+        /* Remove self from parent's active children list */
+        RemoveChildFromList(pParent, runningProcess);
+
+        /* Append self to parent's exiting children list */
+        AddToExitingChildren(pParent, runningProcess);
+
+        /* Unblock parent if it is waiting */
         if (pParent->status == STATUS_BLOCKED_WAIT)
         {
             AddToReadyList(pParent);
         }
-
-        // Put parent process on the ready list
-        runningProcess->exitCode = code;
-        runningProcess->status = STATUS_EXITED;
-
-        // Add myself to the quit children list of the parent
-        // TODO: Make this a list of children
-        pParent->pExitingChildren = runningProcess;
     }
     else
     {
-        // Reset the main entry in the process table
-        // ClearPCB();
         memset(runningProcess, 0, sizeof(Process));
     }
 
     dispatcher();
-
 }
 
-/**************************************************************************
-   Name - k_kill
+/*************************************************************************
+   k_wait()
+*************************************************************************/
+int k_wait(int* code)
+{
+    check_kernel_mode();
 
-   Purpose - Signals a process with the specified signal
+    /* If no active children remain, return error code (-4) */
+    if (runningProcess->childCount == 0)
+        return -4;
 
-   Parameters - Signal to send
+    /* Wait until at least one child is in the exiting list */
+    while (runningProcess->pExitingChildren == NULL) {
+        runningProcess->status = STATUS_BLOCKED_WAIT;
+        dispatcher();
+    }
 
-   Returns -
+    Process* child = runningProcess->pExitingChildren;
+    runningProcess->pExitingChildren = child->nextSiblingProcess;
+    child->nextSiblingProcess = NULL;
+
+    *code = child->exitCode;
+    int childPid = child->pid;
+
+    /* Free the child's PCB by zeroing it out */
+    memset(child, 0, sizeof(Process));
+
+    return childPid;
+}
+
+/*************************************************************************
+   k_kill()
 *************************************************************************/
 int k_kill(int pid, int signal)
 {
-    int result = 0;
+    check_kernel_mode();
+    // Stub: for now, just return 0.
     return 0;
 }
 
-/**************************************************************************
-   Name - k_getpid
+/*************************************************************************
+   k_getpid()
 *************************************************************************/
 int k_getpid()
 {
-    return 0;
+    check_kernel_mode();
+    return runningProcess ? runningProcess->pid : 0;
 }
 
-/**************************************************************************
-   Name - k_join
-***************************************************************************/
+/*************************************************************************
+   k_join()
+*************************************************************************/
 int k_join(int pid, int* pChildExitCode)
 {
+    check_kernel_mode();
+    // Stub
     return 0;
 }
 
-/**************************************************************************
-   Name - unblock
+/*************************************************************************
+   unblock()
 *************************************************************************/
 int unblock(int pid)
 {
+    // Stub
     return 0;
 }
 
 /*************************************************************************
-   Name - block
+   block()
 *************************************************************************/
 int block(int newStatus)
 {
+    // Stub
     return 0;
 }
 
 /*************************************************************************
-   Name - signaled
+   signaled()
 *************************************************************************/
 int signaled()
 {
     return 0;
 }
+
 /*************************************************************************
-   Name - readtime
+   read_time()
 *************************************************************************/
 int read_time()
 {
@@ -354,76 +299,58 @@ int read_time()
 }
 
 /*************************************************************************
-   Name - readClock
+   read_clock()
 *************************************************************************/
 DWORD read_clock()
 {
     return system_clock();
 }
 
+/*************************************************************************
+   display_process_table()
+*************************************************************************/
 void display_process_table()
 {
-
+    // (This function should print the process table in the format expected.)
+    console_output(FALSE, "PID     Parent   Priority  Status        # Kids   CPUtime  Name    \n");
+    for (int i = 0; i < MAX_PROCESSES; i++)
+    {
+        if (processTable[i].status != STATUS_EMPTY)
+        {
+            int parentPid = processTable[i].pParent ? processTable[i].pParent->pid : -1;
+            console_output(FALSE, "%d    %d     %d     %d     %d    %u   %s\n",
+                processTable[i].pid,
+                parentPid,
+                processTable[i].priority,
+                processTable[i].status,
+                processTable[i].childCount,
+                processTable[i].cpuTime,
+                processTable[i].name);
+        }
+    }
 }
 
-/**************************************************************************
-   Name - GetNextPid
-
-   Purpose - 
-
-   Parameters - none
-
-   Returns - 
-
+/*************************************************************************
+   GetNextPid()
 *************************************************************************/
 int GetNextPid()
 {
-    int newPid = -1;
-    int procSlot = nextPid % MAXPROC;
-
-    if (processCount < MAXPROC)
-    {
-        while (processCount < MAXPROC && processTable[procSlot].status != STATUS_EMPTY)
-        {
-            nextPid++;
-            procSlot = nextPid % MAXPROC;
-        }
-        newPid = nextPid++;
-    }
+    int newPid = nextPid++;
     return newPid;
 }
 
-/**************************************************************************
-   Name - AddToReadyList
-
-   Purpose -
-
-   Parameters - none
-
-   Returns - nothing
-
+/*************************************************************************
+   AddToReadyList()
 *************************************************************************/
 void AddToReadyList(Process* pProcess)
 {
-    int priority;
-
     pProcess->status = STATUS_READY;
-
-    priority = pProcess->priority;
-
-    // Add to the ready list based on priority
-    readyList[priority] = pProcess; // Add to tail of list
+    int priority = pProcess->priority;
+    readyList[priority] = pProcess; // Simple: one process per priority (for now)
 }
 
-/**************************************************************************
-   Name - GetNextReadyProc
-
-   Purpose - 
-
-   Parameters - none
-
-   Returns - nothing
-
+/*************************************************************************
+   GetNextReadyProc()
 *************************************************************************/
 Process* GetNextReadyProc()
 {
@@ -431,65 +358,37 @@ Process* GetNextReadyProc()
     Process* nextProcess = NULL;
 
     if (runningProcess != NULL && runningProcess->status == STATUS_RUNNING)
-    {
         higherThanPriority = runningProcess->priority;
-    }
 
-    for (int i = HIGHEST_PRIORITY; i >= higherThanPriority; --i)
+    for (int i = HIGHEST_PRIORITY; i >= higherThanPriority; i--)
     {
         if (readyList[i] != NULL)
         {
-            nextProcess = readyList[i]; // Pop from ready list
-            readyList[i] = NULL; // Pop simulating
+            nextProcess = readyList[i];
+            readyList[i] = NULL;
             break;
         }
     }
-
     return nextProcess;
 }
 
-/**************************************************************************
-   Name - dispatcher
-
-   Purpose - This is where context changes to the next process to run.
-
-   Parameters - none
-
-   Returns - nothing
-
+/*************************************************************************
+   dispatcher()
 *************************************************************************/
 void dispatcher()
 {
-    Process *nextProcess = NULL;
-
-    nextProcess = GetNextReadyProc();
-    //nextProcess = &processTable[2];
-
-    // Next process is null if the current process should remain running
+    Process* nextProcess = GetNextReadyProc();
     if (nextProcess != NULL)
     {
-        /* IMPORTANT: context switch enables interrupts. */
         runningProcess = nextProcess;
-
-        // Set the status of the next process to running
         runningProcess->status = STATUS_RUNNING;
-
         context_switch(runningProcess->context);
     }
+}
 
-} 
-
-/**************************************************************************
-   Name - watchdog
-
-   Purpose - The watchdoog keeps the system going when all other
-         processes are blocked.  It can be used to detect when the system
-         is shutting down as well as when a deadlock condition arises.
-
-   Parameters - none
-
-   Returns - nothing
-   *************************************************************************/
+/*************************************************************************
+   watchdog()
+*************************************************************************/
 static int watchdog(char* dummy)
 {
     DebugConsole("watchdog(): called\n");
@@ -498,58 +397,90 @@ static int watchdog(char* dummy)
         check_deadlock();
     }
     return 0;
-} 
+}
 
-/* check to determine if deadlock has occurred... */
+/*************************************************************************
+   check_deadlock()
+*************************************************************************/
 static void check_deadlock()
 {
-    // TODO: If there are no other processes in the system, then stop
-    console_output(false, "All processes completed.");
+    console_output(FALSE, "All processes completed.\n");
     stop(0);
 }
 
-/*
- * Disables the interrupts.
- */
+/*************************************************************************
+   disableInterrupts()
+*************************************************************************/
 static inline void disableInterrupts()
 {
-
-    /* We ARE in kernel mode */
-
-
     int psr = get_psr();
+    psr &= ~PSR_INTERRUPTS;
+    set_psr(psr);
+}
 
-    psr = psr & ~PSR_INTERRUPTS;
-
-    set_psr( psr);
-
-} /* disableInterrupts */
-
-/**************************************************************************
-   Name - DebugConsole
-   Purpose - Prints  the message to the console_output if in debug mode
-   Parameters - format string and va args
-   Returns - nothing
-   Side Effects -
+/*************************************************************************
+   DebugConsole()
 *************************************************************************/
 static void DebugConsole(char* format, ...)
 {
     char buffer[2048];
     va_list argptr;
-
     if (debugFlag)
     {
         va_start(argptr, format);
         vsprintf(buffer, format, argptr);
         console_output(TRUE, buffer);
         va_end(argptr);
-
     }
 }
 
-
-/* there is no I/O yet, so return false. */
+/*************************************************************************
+   check_io_scheduler()
+*************************************************************************/
 int check_io_scheduler()
 {
     return false;
+}
+
+/*============================================================
+   Helper: AddToExitingChildren()
+   Appends the exiting child to parent's pExitingChildren list.
+============================================================*/
+static void AddToExitingChildren(Process* parent, Process* child)
+{
+    child->nextSiblingProcess = NULL;
+    if (parent->pExitingChildren == NULL)
+        parent->pExitingChildren = child;
+    else {
+        Process* p = parent->pExitingChildren;
+        while (p->nextSiblingProcess != NULL)
+            p = p->nextSiblingProcess;
+        p->nextSiblingProcess = child;
+    }
+}
+
+/*============================================================
+   Helper: RemoveChildFromList()
+   Removes the child from parent's pChildren list.
+============================================================*/
+static void RemoveChildFromList(Process* parent, Process* child)
+{
+    if (!parent)
+        return;
+    Process* prev = NULL;
+    Process* cur = parent->pChildren;
+    while (cur)
+    {
+        if (cur == child)
+        {
+            if (prev)
+                prev->nextSiblingProcess = cur->nextSiblingProcess;
+            else
+                parent->pChildren = cur->nextSiblingProcess;
+            cur->nextSiblingProcess = NULL;
+            return;
+        }
+        prev = cur;
+        cur = cur->nextSiblingProcess;
+    }
 }
