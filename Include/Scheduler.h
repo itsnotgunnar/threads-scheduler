@@ -35,10 +35,7 @@ int   block(int block_status);
 int   unblock(int pid);
 int   get_start_time(void);
 void  time_slice(void);
+void  dispatcher();
 int	  read_time(void);
 DWORD read_clock(void);
 
-/* Our dispatcher and queue-management prototypes: */
-void  dispatcher(void);
-void  k_addToReadyQueue(struct _process* p);
-struct _process* k_getNextReadyProc(void);
