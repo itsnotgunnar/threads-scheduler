@@ -10,7 +10,13 @@ Process processTable[MAX_PROCESSES];
 Process *runningProcess = NULL;
 
 //Process* readyList[HIGHEST_PRIORITY + 1]; // One list per priority
-List readyList;
+List readyList[HIGHEST_PRIORITY + 1]; // One list per priority
+List priority1;
+List priority2;
+List priority3;
+List priority4;
+List priority5;
+
 int nextPid = 1;
 int debugFlag = 0;
 
@@ -70,7 +76,16 @@ int bootstrap(void *pArgs)
     /* Initialize the process table. */
 
     /* Initialize the Ready list, etc. */
-    ListInitialize(&readyList);
+    ListInitialize(&priority1);
+    ListInitialize(&priority2);
+    ListInitialize(&priority3);
+    ListInitialize(&priority4);
+    ListInitialize(&priority5);
+    readyList[1] = priority1;
+    readyList[2] = priority2;
+    readyList[3] = priority3;
+    readyList[4] = priority4;
+    readyList[5] = priority5;
 
     /* Initialize the clock interrupt handler */
     //intVector = get_interrupt_handlers();
@@ -174,7 +189,7 @@ int k_spawn(char* name, int (*entryPoint)(void *), void* arg, int stacksize, int
 
     /* Add the process to the ready list. */
     //AddToReadyList(pNewProc);
-    ListAddNode(&readyList, pNewProc);
+    ListAddNode(&readyList[priority], pNewProc);
 
     /* Initialize context for this process, but use launch function pointer for
      * the initial value of the process's program counter (PC)
@@ -285,7 +300,7 @@ void k_exit(int code)
         if (pParent->status == STATUS_BLOCKED_WAIT)
         {
             //AddToReadyList(pParent);
-            ListAddNode(&readyList, pParent);
+            ListAddNode(&readyList[runningProcess->priority], pParent);
         }
 
         // Put parent process on the ready list
@@ -460,7 +475,7 @@ static void ListInitialize(List* pList)
 --------------------------------------------------------------- */
 static void ListAddNode(List* pList, Process* pProcToAdd)
 {
-    int listOffset;
+    //int listOffset;
 
     pProcToAdd->nextReadyProcess = NULL;
 
@@ -529,7 +544,7 @@ void AddToReadyList(Process* pProcess)
 
     // Add to the ready list based on priority
     //readyList[priority] = pProcess; // Add to tail of list
-    ListAddNode(&readyList, &pProcess);
+    ListAddNode(&readyList[priority], &pProcess);
 }
 
 /**************************************************************************
@@ -554,11 +569,11 @@ Process* GetNextReadyProc()
 
     for (int i = HIGHEST_PRIORITY; i >= higherThanPriority; --i)
     {
-        if (readyList.count > 0)
+        if (readyList[i].count > 0)
         {
             //nextProcess = readyList[i]; // Pop from ready list
             //readyList[i] = NULL; // Pop simulating
-            nextProcess = ListPopNode(&readyList);
+            nextProcess = ListPopNode(&readyList[i]);
             break;
         }
     }
