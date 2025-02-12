@@ -9,7 +9,8 @@
 Process processTable[MAX_PROCESSES];
 Process *runningProcess = NULL;
 
-Process* readyList[HIGHEST_PRIORITY + 1]; // One list per priority
+//Process* readyList[HIGHEST_PRIORITY + 1]; // One list per priority
+List readyList;
 int nextPid = 1;
 int debugFlag = 0;
 
@@ -21,8 +22,14 @@ static void check_deadlock();
 static void DebugConsole(char* format, ...);
 
 static int GetNextPid();
-void AddToReadyList(Process* pProcess);
+Process* GetNextReadyProc();
 static int processCount;
+void timer_interrupt_handler(char deviceId[32], uint8_t command, uint32_t status);
+
+static void ListInitialize(List* pList);
+static void ListAddNode(List* pList, Process* pProcToAdd);
+//void AddToReadyList(Process* pProcess);
+
 int booting = 1;
 
 /* DO NOT REMOVE */
@@ -63,8 +70,11 @@ int bootstrap(void *pArgs)
     /* Initialize the process table. */
 
     /* Initialize the Ready list, etc. */
+    ListInitialize(&readyList);
 
     /* Initialize the clock interrupt handler */
+    //intVector = get_interrupt_handlers();
+    //intVector[THREADS_TIMER_INTERRUPT] = timer_interrupt_handler;
 
     /* startup a watchdog process */
     result = k_spawn("watchdog", watchdog, NULL, THREADS_MIN_STACK_SIZE, LOWEST_PRIORITY);
@@ -163,7 +173,8 @@ int k_spawn(char* name, int (*entryPoint)(void *), void* arg, int stacksize, int
     }
 
     /* Add the process to the ready list. */
-    AddToReadyList(pNewProc);
+    //AddToReadyList(pNewProc);
+    ListAddNode(&readyList, pNewProc);
 
     /* Initialize context for this process, but use launch function pointer for
      * the initial value of the process's program counter (PC)
@@ -230,6 +241,8 @@ int k_wait(int* code)
 
     dispatcher();
 
+    // Interrupts are enabled here
+
     // Get the exit code of the child
     // TODO: Pop first child off of exiting child list
     pExitingChild = runningProcess->pExitingChildren;
@@ -262,6 +275,8 @@ void k_exit(int code)
 {
     Process* pParent;
 
+    // TODO: Disable interrupts
+
     pParent = runningProcess->pParent;
 
     // Wake up the parent process only if they're in k_wait
@@ -269,7 +284,8 @@ void k_exit(int code)
     {
         if (pParent->status == STATUS_BLOCKED_WAIT)
         {
-            AddToReadyList(pParent);
+            //AddToReadyList(pParent);
+            ListAddNode(&readyList, pParent);
         }
 
         // Put parent process on the ready list
@@ -335,6 +351,29 @@ int unblock(int pid)
 *************************************************************************/
 int block(int newStatus)
 {
+    //checkKernelMode(__func__);
+
+    int result = 0;
+
+    if (newStatus <= 10)
+    {
+        console_output(false, "block: function called with a reserved status value.\n");
+        stop(1);
+    }
+
+    disableInterrupts();
+    runningProcess->status = newStatus;
+
+    dispatcher(FALSE);
+
+    disableInterrupts();
+    if (signaled())
+    {
+        DebugConsole("block(): Process signaled while blocked()\n");
+        result = -5;
+    }
+    //enableInterrupts();
+
     return 0;
 }
 
@@ -393,6 +432,83 @@ int GetNextPid()
     return newPid;
 }
 
+/* ---------------------------------------------------------------
+    ListInitialize
+
+    Purpose - Initialize a List type
+    Parameters - nextPrevOffset - offset from beginning of
+                structure to the next and previous pointers
+                with the structure that makes up the nodes
+    Returns - None
+    Side Effects -
+--------------------------------------------------------------- */
+static void ListInitialize(List* pList)
+{
+    pList->pHead = pList->pTail = NULL;
+    pList->count = 0;
+}
+
+/* ---------------------------------------------------------------
+    ListAddNode
+
+    Purpose - Adds a node to the end of the list
+    Parameters - List *pList - pointer to the list
+                TestStructure *pStructToAdd - pointer
+                to the structure to add
+    Returns - None
+    Side Effects -
+--------------------------------------------------------------- */
+static void ListAddNode(List* pList, Process* pProcToAdd)
+{
+    int listOffset;
+
+    pProcToAdd->nextReadyProcess = NULL;
+
+    if (pList->pHead == NULL)
+    {
+        // Set both the head and the tail pointer to the new node
+        pList->pHead = pList->pTail = pProcToAdd;
+    }
+    else
+    {
+        // Move the tail after pointing to it with current tail's pNext
+        pList->pTail->nextReadyProcess = pProcToAdd;
+        pList->pTail = pProcToAdd;
+    }
+    pList->count++;
+}
+
+/* ---------------------------------------------------------------
+    ListPopNodeEvens
+
+    Purpose - Removes the first node from the list and returns
+                a pointer to it
+    Parameters - List *pList - pointer to the list
+    Returns - A pointer to the removed node
+    Side Effects -
+--------------------------------------------------------------- */
+static Process* ListPopNode(List* pList)
+{
+    Process* pNode = NULL;
+
+    if (pList->count > 0)
+    {
+        pNode = pList->pHead;
+        pList->pHead = pNode->nextReadyProcess;
+        pList->count--;
+
+        // Clear prev and next
+        pNode->nextReadyProcess = NULL;
+
+        // Clear the tail pointer if the list is now empty
+        if (pList->count == 0)
+        {
+            pList->pHead = pList->pTail = NULL;
+        }
+    }
+    return pNode;
+}
+
 /**************************************************************************
    Name - AddToReadyList
 
@@ -412,7 +528,8 @@ void AddToReadyList(Process* pProcess)
     priority = pProcess->priority;
 
     // Add to the ready list based on priority
-    readyList[priority] = pProcess; // Add to tail of list
+    //readyList[priority] = pProcess; // Add to tail of list
+    ListAddNode(&readyList, &pProcess);
 }
 
 /**************************************************************************
@@ -437,15 +554,47 @@ Process* GetNextReadyProc()
 
     for (int i = HIGHEST_PRIORITY; i >= higherThanPriority; --i)
     {
-        if (readyList[i] != NULL)
+        if (readyList.count > 0)
         {
-            nextProcess = readyList[i]; // Pop from ready list
-            readyList[i] = NULL; // Pop simulating
+            //nextProcess = readyList[i]; // Pop from ready list
+            //readyList[i] = NULL; // Pop simulating
+            nextProcess = ListPopNode(&readyList);
             break;
         }
     }
 
     return nextProcess;
+}
+
+/**************************************************************************
+   Name - time_slice
+
+   Purpose -
+
+   Parameters - none
+
+   Returns - nothing
+
+*************************************************************************/
+void  time_slice(void)
+{
+    // If the current process has been running for 80ms or more, do something
+
+}
+
+/**************************************************************************
+   Name - timer_interrupt_handler
+
+   Purpose -
+
+   Parameters - none
+
+   Returns - nothing
+
+*************************************************************************/
+void timer_interrupt_handler(char deviceId[32], uint8_t command, uint32_t status)
+{
+    time_slice();
 }
 
 /**************************************************************************
@@ -545,6 +694,22 @@ static void DebugConsole(char* format, ...)
         va_end(argptr);
 
     }
+}
+
+/**************************************************************************
+   Name - CheckKernelMode
+
+   Purpose - Checks the PSR for kernel mode
+   and halts if in user mode
+
+   Parameters -
+
+   Returns -
+
+*************************************************************************/
+static inline void CheckKernelMode(const char *functionName)
+{
+
 }
 
 
